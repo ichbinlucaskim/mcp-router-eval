@@ -4,13 +4,22 @@
 
 - **Done:** capstone proposal (with a dated post-ground-truth revision) + build-readiness report +
   firsthand ground-truth inspection; **ADRs 0001–0013**; repo scaffold; `scripts/fetch_data.py`
-  (dataset pinned to commit `b630b98`); **`contracts.py` frozen** — the 4 boundary contracts
-  (RouteResult / ExecPlan / ExecResult / Attribution) with **20 tests green**.
-- **Current position:** end of **T1.1** on the **T1 (contract layer)** track.
-- **Next:** **T1.2** invariant checks (closure-complete / dangling-param → `InvariantReport`) →
-  **T1.3** deterministic attribution rule.
-- Everything else in `src/mcp_router_eval/` (loader, graph_build, routers, embedding, executor, eval)
-  is still an intentional stub (`raise NotImplementedError`).
+  (dataset pinned to commit `b630b98`). **Contract layer (T1) complete** and merged to `main`:
+  - **T1.1** — `contracts.py` frozen: the 4 boundary contracts (RouteResult / ExecPlan / ExecResult /
+    Attribution) + nested types (pydantic v2, `extra="forbid"`).
+  - **T1.2** — `contract_layer/invariants.py`: closure-complete / dangling-param checks
+    (`PARAMETER_*` only, ADR 0013), dependency info **injected** (no loader coupling).
+  - **T1.3** — `contract_layer/attribution.py`: deterministic ROUTING/CONTRACT/EXECUTION blame with
+    the **upstream-wins** rule; `InvariantReport` + gold set **injected**, imports only `contracts`.
+  - **37 tests green on `main`** (20 contracts + 8 invariants + 9 attribution).
+- **Current position:** **contract layer (T1) done.**
+- **Next:** the **data pipeline** — preprocess (raw→processed, ADR 0011) → loader (ADR 0008/0012) →
+  graph_build (PyG graph: 4 edge types + `is_core`, ADR 0006/0013).
+- **Deferred — `gate.py` (T1.4):** intentionally not built yet. The gate consumes `confidence` /
+  `homophily_local` (router-produced) and is tuned against `completion_rate` (executor-produced), so
+  it is YAGNI until the router and executor exist to produce those signals.
+- Everything else in `src/mcp_router_eval/` (loader, graph_build, gate, routers, embedding, executor,
+  eval) is still an intentional stub (`raise NotImplementedError`).
 
 ## Standing rule — verify before asserting (all sessions)
 
