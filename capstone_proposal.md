@@ -43,45 +43,45 @@ Three layers. The middle layer (Contract) is the primary engineering contributio
 
 ```
                           ┌──────────────────────────────────────────────────┐
-                          │                  USER QUERY (q)                    │
-                          │      "get the current price of Tesla stock"        │
+                          │                  USER QUERY (q)                  │
+                          │      "get the current price of Tesla stock"      │
                           └───────────────────────┬──────────────────────────┘
                                                   │ q : str
                                                   ▼
         ┌──────────────────────────────────────────────────────────────────────┐
-        │ LAYER 1 — ROUTER  (GNN over the tool dependency graph)                 │
-        │                                                                        │
-        │   Tool Graph G = (V, E)                                                │
-        │     V = tools, x_v = text embedding of tool doc                        │
-        │     E = typed dependency edges (param-source / precond / core)         │
-        │                                                                        │
-        │   query-conditioned R-GCN / GAT  →  score(v | q)  for all v ∈ V        │
-        │   select top-k + dependency closure                                    │
-        └───────────────────────────────────┬────────────────────────────────────┘
+        │ LAYER 1 — ROUTER  (GNN over the tool dependency graph)               │
+        │                                                                      │
+        │   Tool Graph G = (V, E)                                              │
+        │     V = tools, x_v = text embedding of tool doc                      │
+        │     E = typed dependency edges (param-source / precond / core)       │
+        │                                                                      │
+        │   query-conditioned R-GCN / GAT  →  score(v | q)  for all v ∈ V      │
+        │   select top-k + dependency closure                                  │
+        └───────────────────────────────────┬──────────────────────────────────┘
                                             │ RouteResult  (see §3.1)
                                             ▼
         ┌──────────────────────────────────────────────────────────────────────┐
-        │ LAYER 2 — CONTRACT  (executor-agnostic; the core contribution)         │
-        │                                                                        │
-        │   (a) INTERFACE   validate RouteResult schema                          │
-        │   (b) INVARIANTS  check dependency-closure, no dangling param source   │
-        │   (c) GATE        if low-confidence/low-homophily → vector fallback    │
-        │   (d) TRACE INIT  open an attributable execution trace                 │
-        └───────────────────────────────────┬────────────────────────────────────┘
+        │ LAYER 2 — CONTRACT  (executor-agnostic; the core contribution)       │
+        │                                                                      │
+        │   (a) INTERFACE   validate RouteResult schema                        │
+        │   (b) INVARIANTS  check dependency-closure, no dangling param source │
+        │   (c) GATE        if low-confidence/low-homophily → vector fallback  │
+        │   (d) TRACE INIT  open an attributable execution trace               │
+        └───────────────────────────────────┬──────────────────────────────────┘
                                             │ ExecPlan  (see §3.2)
                                             ▼
         ┌──────────────────────────────────────────────────────────────────────┐
-        │ LAYER 3 — EXECUTOR  (Claude Code / Anthropic Agent SDK)                │
-        │                                                                        │
-        │   bind tools → drive calls → collect call trace → completion verdict   │
-        └───────────────────────────────────┬────────────────────────────────────┘
+        │ LAYER 3 — EXECUTOR  (Claude Code / Anthropic Agent SDK)              │
+        │                                                                      │
+        │   bind tools → drive calls → collect call trace → completion verdict │
+        └───────────────────────────────────┬──────────────────────────────────┘
                                             │ ExecResult  (see §3.3)
                                             ▼
         ┌──────────────────────────────────────────────────────────────────────┐
-        │ EVALUATION + ATTRIBUTION                                               │
-        │   retrieval metrics (mAP/recall/nDCG)                                  │
-        │   execution metrics (completion / latency / context-fidelity)          │
-        │   failure attribution: ROUTING | CONTRACT | EXECUTION  (see §3.4)      │
+        │ EVALUATION + ATTRIBUTION                                             │
+        │   retrieval metrics (mAP/recall/nDCG)                                │
+        │   execution metrics (completion / latency / context-fidelity)        │
+        │   failure attribution: ROUTING | CONTRACT | EXECUTION  (see §3.4)    │
         └──────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -362,3 +362,24 @@ Each line cites the ADR / inspection that drove it (see [`docs/`](docs/)).
 **Executor SDK naming.** The executor is Claude Code driven via the **`claude-agent-sdk`** Python
 package (the current name of what §1.4/§7 call the "Anthropic Agent SDK"); the raw `anthropic` client
 cannot drive the agent loop. *(ADR 0002.)*
+
+### Build order (actual, dependency-driven)
+
+The §7 Phase numbering (0 reproduce → 1 contract → 2 executor → 3 GNN → …) was the **initial plan of
+record** and is kept intact above. The **actual** build order follows *dependency*, not phase number:
+
+1. **Contract layer (T1)** — built first and **frozen** (schemas → invariants → attribution). It is the
+   spine every other component talks through.
+2. **Data pipeline** — preprocess (raw→processed) → loader → graph_build.
+3. **Executor (T2)** — wired *after* the data pipeline.
+4. **Routers / GNN (T3)**.
+5. **Evaluation / attribution wiring**, then the **gate**.
+
+**Why the reorder:** a component that *consumes* a contract (executor, routers) is built only once
+that contract is frozen **and** its real inputs exist — otherwise it would be written against
+throwaway fixtures and reworked. The executor also consumes loader/graph_build output (real
+`ToolSpec` schemas), so it follows the data pipeline rather than preceding the GNN.
+
+**Not skipped, just resequenced:** the executor (Phase 2 / T2.1–T2.3) is **not** dropped — it comes
+*after* the data pipeline instead of before the GNN. The **gate (T1.4)** stays **deferred** until the
+router and executor exist to produce its inputs (`confidence` / `homophily_local` / `completion_rate`).
