@@ -362,3 +362,24 @@ Each line cites the ADR / inspection that drove it (see [`docs/`](docs/)).
 **Executor SDK naming.** The executor is Claude Code driven via the **`claude-agent-sdk`** Python
 package (the current name of what §1.4/§7 call the "Anthropic Agent SDK"); the raw `anthropic` client
 cannot drive the agent loop. *(ADR 0002.)*
+
+### Build order (actual, dependency-driven)
+
+The §7 Phase numbering (0 reproduce → 1 contract → 2 executor → 3 GNN → …) was the **initial plan of
+record** and is kept intact above. The **actual** build order follows *dependency*, not phase number:
+
+1. **Contract layer (T1)** — built first and **frozen** (schemas → invariants → attribution). It is the
+   spine every other component talks through.
+2. **Data pipeline** — preprocess (raw→processed) → loader → graph_build.
+3. **Executor (T2)** — wired *after* the data pipeline.
+4. **Routers / GNN (T3)**.
+5. **Evaluation / attribution wiring**, then the **gate**.
+
+**Why the reorder:** a component that *consumes* a contract (executor, routers) is built only once
+that contract is frozen **and** its real inputs exist — otherwise it would be written against
+throwaway fixtures and reworked. The executor also consumes loader/graph_build output (real
+`ToolSpec` schemas), so it follows the data pipeline rather than preceding the GNN.
+
+**Not skipped, just resequenced:** the executor (Phase 2 / T2.1–T2.3) is **not** dropped — it comes
+*after* the data pipeline instead of before the GNN. The **gate (T1.4)** stays **deferred** until the
+router and executor exist to produce its inputs (`confidence` / `homophily_local` / `completion_rate`).
