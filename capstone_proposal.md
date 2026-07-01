@@ -43,45 +43,45 @@ Three layers. The middle layer (Contract) is the primary engineering contributio
 
 ```
                           ┌──────────────────────────────────────────────────┐
-                          │                  USER QUERY (q)                    │
-                          │      "get the current price of Tesla stock"        │
+                          │                  USER QUERY (q)                  │
+                          │      "get the current price of Tesla stock"      │
                           └───────────────────────┬──────────────────────────┘
                                                   │ q : str
                                                   ▼
         ┌──────────────────────────────────────────────────────────────────────┐
-        │ LAYER 1 — ROUTER  (GNN over the tool dependency graph)                 │
-        │                                                                        │
-        │   Tool Graph G = (V, E)                                                │
-        │     V = tools, x_v = text embedding of tool doc                        │
-        │     E = typed dependency edges (param-source / precond / core)         │
-        │                                                                        │
-        │   query-conditioned R-GCN / GAT  →  score(v | q)  for all v ∈ V        │
-        │   select top-k + dependency closure                                    │
-        └───────────────────────────────────┬────────────────────────────────────┘
+        │ LAYER 1 — ROUTER  (GNN over the tool dependency graph)               │
+        │                                                                      │
+        │   Tool Graph G = (V, E)                                              │
+        │     V = tools, x_v = text embedding of tool doc                      │
+        │     E = typed dependency edges (param-source / precond / core)       │
+        │                                                                      │
+        │   query-conditioned R-GCN / GAT  →  score(v | q)  for all v ∈ V      │
+        │   select top-k + dependency closure                                  │
+        └───────────────────────────────────┬──────────────────────────────────┘
                                             │ RouteResult  (see §3.1)
                                             ▼
         ┌──────────────────────────────────────────────────────────────────────┐
-        │ LAYER 2 — CONTRACT  (executor-agnostic; the core contribution)         │
-        │                                                                        │
-        │   (a) INTERFACE   validate RouteResult schema                          │
-        │   (b) INVARIANTS  check dependency-closure, no dangling param source   │
-        │   (c) GATE        if low-confidence/low-homophily → vector fallback    │
-        │   (d) TRACE INIT  open an attributable execution trace                 │
-        └───────────────────────────────────┬────────────────────────────────────┘
+        │ LAYER 2 — CONTRACT  (executor-agnostic; the core contribution)       │
+        │                                                                      │
+        │   (a) INTERFACE   validate RouteResult schema                        │
+        │   (b) INVARIANTS  check dependency-closure, no dangling param source │
+        │   (c) GATE        if low-confidence/low-homophily → vector fallback  │
+        │   (d) TRACE INIT  open an attributable execution trace               │
+        └───────────────────────────────────┬──────────────────────────────────┘
                                             │ ExecPlan  (see §3.2)
                                             ▼
         ┌──────────────────────────────────────────────────────────────────────┐
-        │ LAYER 3 — EXECUTOR  (Claude Code / Anthropic Agent SDK)                │
-        │                                                                        │
-        │   bind tools → drive calls → collect call trace → completion verdict   │
-        └───────────────────────────────────┬────────────────────────────────────┘
+        │ LAYER 3 — EXECUTOR  (Claude Code / Anthropic Agent SDK)              │
+        │                                                                      │
+        │   bind tools → drive calls → collect call trace → completion verdict │
+        └───────────────────────────────────┬──────────────────────────────────┘
                                             │ ExecResult  (see §3.3)
                                             ▼
         ┌──────────────────────────────────────────────────────────────────────┐
-        │ EVALUATION + ATTRIBUTION                                               │
-        │   retrieval metrics (mAP/recall/nDCG)                                  │
-        │   execution metrics (completion / latency / context-fidelity)          │
-        │   failure attribution: ROUTING | CONTRACT | EXECUTION  (see §3.4)      │
+        │ EVALUATION + ATTRIBUTION                                             │
+        │   retrieval metrics (mAP/recall/nDCG)                                │
+        │   execution metrics (completion / latency / context-fidelity)        │
+        │   failure attribution: ROUTING | CONTRACT | EXECUTION  (see §3.4)    │
         └──────────────────────────────────────────────────────────────────────┘
 ```
 
