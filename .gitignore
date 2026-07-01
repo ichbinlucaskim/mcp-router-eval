@@ -21,5 +21,9 @@ venv/
 data/raw/
 *.parquet
 
+# Processed artifacts are regenerable from raw + code (ADR 0011 / 0014) — never committed.
+data/processed/*
+!data/processed/.gitkeep
+
 # OS
 .DS_Store
