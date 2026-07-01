@@ -1,5 +1,17 @@
 # Documentation
 
+## Project status (as of 2026-07-01)
+
+- **Done:** capstone proposal (with a dated post-ground-truth revision) + build-readiness report +
+  firsthand ground-truth inspection; **ADRs 0001–0013**; repo scaffold; `scripts/fetch_data.py`
+  (dataset pinned to commit `b630b98`); **`contracts.py` frozen** — the 4 boundary contracts
+  (RouteResult / ExecPlan / ExecResult / Attribution) with **20 tests green**.
+- **Current position:** end of **T1.1** on the **T1 (contract layer)** track.
+- **Next:** **T1.2** invariant checks (closure-complete / dangling-param → `InvariantReport`) →
+  **T1.3** deterministic attribution rule.
+- Everything else in `src/mcp_router_eval/` (loader, graph_build, routers, embedding, executor, eval)
+  is still an intentional stub (`raise NotImplementedError`).
+
 ## Standing rule — verify before asserting (all sessions)
 
 When any decision, convention, or fact is uncertain or ambiguous — data-format questions, library
