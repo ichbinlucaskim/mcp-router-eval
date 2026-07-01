@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mcp-router-eval"
+version = "0.0.0"
+description = "Contract-driven evaluation of GNN tool routing in agentic MCP pipelines"
+requires-python = ">=3.11"
+readme = "README.md"
+
+# NOTE: dependencies are declared here but NOT installed in the scaffolding session.
+dependencies = [
+    "torch",
+    "torch-geometric",
+    "pydantic>=2",
+    "scikit-learn",
+    "numpy",
+    "pandas",
+    "rank-bm25",
+    "sentence-transformers",
+    "claude-agent-sdk",
+    "pyyaml",
+]
+
+[project.optional-dependencies]
+# Optional acceleration for PyG; only install if a segment-op error appears (see build-readiness report).
+scatter = ["torch-scatter"]
+dev = ["pytest"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
