@@ -2,6 +2,10 @@
 
 **One-line thesis:** Retrieval accuracy is *not* task completion. We build an evaluation framework that measures the loss in transfer from routing quality to end-to-end task completion in an MCP agentic pipeline, design an executor-agnostic *contract layer* with a failure-attribution taxonomy between router and executor, and show that a dependency-aware GNN router reduces this transfer loss on dependency/composite queries.
 
+> **NORTH STAR:** Evaluate MCP tool routing by **end-to-end structural task completion**, not retrieval accuracy, and test whether a **dependency-aware GNN router** reduces the **retrieval→completion transfer loss** on **deep-dependency** queries.
+
+> ℹ️ This document has a dated revision at the bottom — [**Revised 2026-07-01 (post-ground-truth)**](#revised-2026-07-01-post-ground-truth) — recording how the real ToolLinkOS data changed the design. The original text below is intentionally left intact; read it together with the revision.
+
 ---
 
 ## 1. Background & Problem Statement
@@ -294,3 +298,67 @@ This capstone directly exercises: MCP tool/server performance evaluation across 
 ---
 
 *Stretch (only if time remains): add LangGraph as a second executor behind the same contract to demonstrate the contract layer is executor-agnostic.*
+
+---
+
+## Revised 2026-07-01 (post-ground-truth)
+
+The original design above was written before the ToolLinkOS data was inspected firsthand. Standing up
+the dataset (fetch + inspection) and freezing the contract layer surfaced facts that changed several
+choices. The original prose is left intact; this delta records what the real data changed and why.
+Each line cites the ADR / inspection that drove it (see [`docs/`](docs/)).
+
+**Data pipeline**
+
+- **Preprocessing stage added (raw → processed).** Raw ToolLinkOS is dirty — type aliasing
+  (`bool`/`boolean`, `int`/`integer`), 21 non-scalar `dict`/`list`/`array` params, `enum`/`default`
+  side-keys, 2 malformed dependency rows, 2 malformed param objects. A dedicated stage normalizes
+  `data/raw/` → `data/processed/`; loaders and all pipeline code read **processed only** (raw is
+  immutable). *(ADR 0011; `docs/data-inspection-toollinkos.md`.)*
+
+**Dependency edges & execution order**
+
+- **Edges split by function.** `PARAMETER_*` = execution precondition; `TOOL_*` = conceptual
+  association. The router/GNN sees all **4** relation types (`param_direct`, `param_indirect`,
+  `tool_direct`, `tool_indirect`); *ordering* consumes `PARAMETER_*` only. *(ADR 0006/0013.)*
+- **Execution order = topo-sort of the `PARAMETER_*` sub-graph.** The full 4-type graph is **cyclic**
+  (485/573 nodes; **1,374/1,569 gold sets** contain a cycle) because of `TOOL_INDIRECTLY` get/set
+  pairs (e.g. `get_location_service_status ⇄ set_location_service_status`). The `PARAMETER_*`
+  sub-graph is acyclic across all instances, so ordering uses it; `TOOL_*` is excluded from ordering.
+  The stored `golden_function_names` order is **main-first, not runnable order**. *(ADR 0012 amended,
+  0013; `docs/feasibility-completion.md`.)*
+
+**Query slicing**
+
+- **Single-vs-composite → closure-depth buckets.** ToolLinkOS has **zero** single-tool queries (every
+  instance has ≥2 gold tools; mean ≈6). The §4 headline slice becomes **shallow (2–3 gold tools)** vs
+  **deep (≥6)**. *(ADR 0005; inspection.)*
+
+**Completion & embeddings**
+
+- **Completion is a STRUCTURAL proxy, not semantic.** Tools are fictional and instances carry no gold
+  args/answers, so `completed` = correct tool set + dependency order + type-valid args — not real task
+  success. *(ADR 0004.)*
+- **Embeddings = local BGE behind a provider interface**, with ada-002 optional (only to reproduce the
+  paper's published dense-baseline numbers). Claude has no embedding API; relative comparisons need
+  only one shared embedding space. *(ADR 0003.)*
+
+**Benchmark & deliverables**
+
+- **ToolLinkOS is the sole primary benchmark; ToolSandbox is demoted to stretch** (Apple custom
+  license = no redistribution; it is a stateful conversational eval, not a dependency-typed retrieval
+  graph with gold ranked labels). This **supersedes the "two-layer / two-benchmark" wording in §8**:
+  the reproducible benchmark is ToolLinkOS-only (retrieval on the full set, execution on a bounded
+  sample), with ToolSandbox as an optional second benchmark only if independently annotated.
+  *(ADR 0001.)*
+
+**14-week plan**
+
+- **Phase 0 groundwork now explicitly includes the data-verification work already done**: fetch +
+  pin the dataset (`scripts/fetch_data.py`, commit `b630b98`), normalize the type vocabulary, verify
+  `core ≠ leaf` (30/50 core tools have deps), and run the cycle/DAG check that scoped ordering to the
+  `PARAMETER_*` sub-graph. These are prerequisites to T0.1/T3.1, not incidental.
+
+**Executor SDK naming.** The executor is Claude Code driven via the **`claude-agent-sdk`** Python
+package (the current name of what §1.4/§7 call the "Anthropic Agent SDK"); the raw `anthropic` client
+cannot drive the agent loop. *(ADR 0002.)*

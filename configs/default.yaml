@@ -20,6 +20,7 @@ routers:
   - graphrag_traversal
   - graphsage
   - rgcn
+  - gat
 
 eval:
   k_values: [10, 20]

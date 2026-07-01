@@ -38,6 +38,7 @@ Recommendation: `claude-agent-sdk`, registering the mock tools (§3) as in-proce
 ### ToolLinkOS — `github.com/EliasLumer/Graph-RAG-Tool-Fusion-ToolLinkOS`
 - **Format:** three plain JSON files. `regular_tools.json` (523 tools), `core_tools.json` (50 tools), `instances.json` (1,569 queries). No Neo4j/CSV needed — the PNG shows Neo4j but the shipped data is JSON.
 - **Tool representation:** `{name, description, parameters[{name,type,description,required}], depends_on[], func_type}`. `func_type ∈ {regular, core}`. Core tools have **empty `depends_on`** (leaf utilities others depend on). Tool identity = `name` string (there is **no `tool_id`**).
+  > **[Corrected 2026-07-01 per `docs/data-inspection-toollinkos.md`]** The "core tools have empty `depends_on` / leaf utilities" statement above is **wrong**: firsthand inspection found **30/50 core tools DO have dependencies**; only 20 are leaves. Do not assume `core ⇒ leaf` anywhere (see ADR 0012).
 - **Dependency encoding — 4 edge types, not 3:** `depends_on` entries carry `dependence_type ∈ {TOOL_DIRECTLY_DEPENDS_ON (676), TOOL_INDIRECTLY_DEPENDS_ON (175), PARAMETER_DIRECTLY_DEPENDS_ON (404), PARAMETER_INDIRECTLY_DEPENDS_ON (239)}` plus **2 malformed `PARAMETER_DEPENDS_ON`** rows. Mapping to the proposal's `param_source / precond / core`:
   - `param_source` ← PARAMETER_{DIRECTLY,INDIRECTLY} ✅
   - `precond` ← TOOL_{DIRECTLY,INDIRECTLY} ✅
