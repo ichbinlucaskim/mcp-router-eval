@@ -59,13 +59,21 @@ def write_source_md(results: list[tuple[str, int, str]]) -> None:
     lines = [
         "# ToolLinkOS data source",
         "",
-        "Fetched by `scripts/fetch_data.py`. Not redistributed in this repo (gitignored); "
-        "re-fetch with the script. License: MIT (see upstream repo).",
+        "Fetched by `scripts/fetch_data.py`. **Not redistributed in this repo** (gitignored); "
+        "re-fetch with the script.",
         "",
         f"- Repo: https://github.com/{REPO}",
         f"- Commit: `{COMMIT}`",
         f"- Path: `toollinkos/`",
+        f"- License: **MIT** — https://github.com/{REPO}/blob/{COMMIT}/LICENSE",
         f"- Fetched (UTC): {datetime.now(timezone.utc).isoformat(timespec='seconds')}",
+        "",
+        "## Upstream disclaimer (quoted from the ToolLinkOS README)",
+        "",
+        "> All references to company names or services in the ToolLinkOS dataset are entirely "
+        "fictional and used solely for illustrative purposes. No endorsement or affiliation is "
+        "implied. The tools are non-functional and are only for research and illustrative "
+        "purposes. There is no intended goal to make the tools functional.",
         "",
         "| File | Bytes | SHA-256 |",
         "| --- | ---: | --- |",
