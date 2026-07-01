@@ -30,3 +30,8 @@ dev = ["pytest"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.pytest.ini_options]
+# Make `pytest` work from a fresh clone without installing the package.
+pythonpath = ["src"]
+testpaths = ["tests"]
