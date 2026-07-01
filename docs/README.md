@@ -2,29 +2,35 @@
 
 ## Project status (as of 2026-07-01)
 
-- **Done:** capstone proposal (with a dated post-ground-truth revision) + build-readiness report +
-  firsthand ground-truth inspection; **ADRs 0001–0013**; repo scaffold; `scripts/fetch_data.py`
-  (dataset pinned to commit `b630b98`). **Contract layer (T1) complete** and merged to `main`:
-  - **T1.1** — `contracts.py` frozen: the 4 boundary contracts (RouteResult / ExecPlan / ExecResult /
-    Attribution) + nested types (pydantic v2, `extra="forbid"`).
-  - **T1.2** — `contract_layer/invariants.py`: closure-complete / dangling-param checks
-    (`PARAMETER_*` only, ADR 0013), dependency info **injected** (no loader coupling).
-  - **T1.3** — `contract_layer/attribution.py`: deterministic ROUTING/CONTRACT/EXECUTION blame with
-    the **upstream-wins** rule; `InvariantReport` + gold set **injected**, imports only `contracts`.
-  - **37 tests green on `main`** (20 contracts + 8 invariants + 9 attribution).
-- **Build order is dependency-driven, not §7 phase-number order** (see the proposal's "Build order
-  (actual, dependency-driven)" note): contract layer → data pipeline → executor → routers/GNN →
-  eval → gate.
-- **Done:** contract layer (T1) + data pipeline **preprocess** (ADR 0011/0014) + **loader**
-  (ADR 0008/0012).
-- **Current:** **graph_build** (PyG graph: 4 edge relations + `is_core` node feature, ADR 0006/0013).
-- **Then:** **executor (T2)** — Claude Code via `claude-agent-sdk`, mock tools (NOT skipped — it
-  follows the data pipeline) → **routers / GNN (T3)** → **evaluation / attribution wiring** → **gate**.
-- **Deferred — `gate.py` (T1.4):** the gate consumes `confidence` / `homophily_local`
-  (router-produced) and is tuned against `completion_rate` (executor-produced), so it is YAGNI until
-  the router and executor exist to produce those signals.
-- Everything else in `src/mcp_router_eval/` (loader, graph_build, gate, routers, embedding, executor,
-  eval) is still an intentional stub (`raise NotImplementedError`).
+Groundwork: capstone proposal (with a dated post-ground-truth revision) + build-readiness report +
+firsthand ground-truth inspection; **ADRs 0001–0014**; repo scaffold; `scripts/fetch_data.py`
+(dataset pinned to commit `b630b98`).
+
+**Build order is dependency-driven, not §7 phase-number order** (see the proposal's "Build order
+(actual, dependency-driven)" note): contract layer → data pipeline → executor → routers/GNN → eval → gate.
+
+- **Done — Contract layer (T1)**, on `main`:
+  - **T1.1** `contracts.py` — 4 boundary contracts (RouteResult / ExecPlan / ExecResult / Attribution)
+    + nested types (pydantic v2, `extra="forbid"`).
+  - **T1.2** `contract_layer/invariants.py` — closure-complete / dangling-param (`PARAMETER_*` only,
+    ADR 0013), deps **injected**.
+  - **T1.3** `contract_layer/attribution.py` — deterministic ROUTING/CONTRACT/EXECUTION blame,
+    **upstream-wins** rule; report + gold set **injected**.
+- **Done — Data pipeline**, on `main`:
+  - **preprocess** (ADR 0011/0014) — raw→processed JSONL/JSON + fail-loud validation hook (canonical
+    types, 573 tools, referential integrity, `PARAMETER_*` acyclic).
+  - **loader** (ADR 0008/0012) — processed → `ToolSpec` + injected `tool_deps` + queries (`q{index}`);
+    `execution_order()` topo-sorts the `PARAMETER_*` sub-graph.
+  - **graph_build** (ADR 0006/0013) — PyG `Data(x, edge_index, edge_type)`, `num_relations=4` typed
+    edges + `is_core` node feature; `ToolGraph` contract frozen; **RGCNConv forward smoke test green**.
+  - **70 tests green on `main`** (37 contract layer + 13 preprocess + 13 loader/integration + 7 graph_build).
+- **Current position:** data pipeline done — **entering the executor (T2)**.
+- **Remaining:** **executor (T2)** (Claude Code via `claude-agent-sdk`, mock tools — NOT skipped) →
+  **routers / GNN (T3)** → **evaluation / attribution wiring** → **gate**.
+- **Deferred — `gate.py` (T1.4):** consumes `confidence` / `homophily_local` (router) and is tuned
+  against `completion_rate` (executor), so it is YAGNI until the router and executor exist.
+- Still intentional stubs (`raise NotImplementedError`): `embedding/*`, `executor/*`, `routers/*`,
+  `eval/*`, `contract_layer/gate.py`.
 
 ## Standing rule — verify before asserting (all sessions)
 
