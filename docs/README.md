@@ -139,3 +139,8 @@ Title / Status / Context / Decision / Consequences / Alternatives considered.
 | [0018](adr/0018-router-interface-signals.md) | Router interface: normalized confidence common to all routers; model-specific signals (homophily) not forced | Accepted (amended 2026-07-05) |
 | [0019](adr/0019-hybrid-fusion-convex-combination.md) | Hybrid fusion = convex combination of normalized scores (not RRF); α tunable, default 0.5 | Accepted |
 | [0020](adr/0020-uniform-router-document-text.md) | All routers index/embed the same tool document text (fair method comparison) | Accepted |
+| [0022](adr/0022-gnn-formulation-query-conditioned-scoring.md) | GNN router formulation = query-conditioned node scoring (not link prediction / node classification) | Accepted |
+
+> **Note:** ADR-0021 (traversal router) lives on the `traversal-baseline` branch and ADR-0022 on the
+> `gnn-adr` branch; both are not yet on `main`. The index is reconciled to a contiguous 0001–00NN when
+> those branches merge.
