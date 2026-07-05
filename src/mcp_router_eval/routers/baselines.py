@@ -1,26 +1,30 @@
-"""Baseline routers (§5.1): **BM25** (lexical), **NaiveRAG** (dense), **HybridRAG** (fusion).
+"""Baseline routers (§5.1): **BM25** (lexical), **NaiveRAG** (dense), **HybridRAG** (fusion),
+**Traversal** (Graph RAG-Tool Fusion).
 
-All three do **pure ranking only** (ADR 0018 + amendment) — they emit ``ranked_tools`` + a ``top_k``;
-the shared :mod:`~mcp_router_eval.routers.closure` stage expands the dependency closure. Every router
-consumes the **same** per-tool document text via :func:`tool_document` (ADR 0020), so the comparison
-isolates method, not input.
+BM25 / NaiveRAG / HybridRAG do **pure ranking only** (ADR 0018 + amendment) — they emit
+``ranked_tools`` + a ``top_k`` and the shared :mod:`~mcp_router_eval.routers.closure` stage expands the
+dependency closure. Every router consumes the **same** per-tool document text via :func:`tool_document`
+(ADR 0020), so the comparison isolates method, not input.
 
-- **BM25** — strong lexical baseline, tuned ``k1=0.9, b=0.4`` (Pyserini, ADR 0018), not library
-  defaults; a weak baseline would make the thesis comparison meaningless (BEIR).
-- **NaiveRAG** — dense cosine over the embedding provider (LocalEmbedder BGE, ADR 0003); the 573 tool
-  vectors are computed once and served from the provider's versioned cache thereafter.
+- **BM25** — strong lexical baseline, tuned ``k1=0.9, b=0.4`` (Pyserini, ADR 0018).
+- **NaiveRAG** — dense cosine over the embedding provider (LocalEmbedder BGE, ADR 0003); 573 tool
+  vectors computed once and served from the provider cache.
 - **HybridRAG** — convex-combination fusion of BM25 + NaiveRAG (ADR 0019):
-  ``α·norm(dense) + (1−α)·norm(sparse)`` over min-max-normalized scores (ADR 0018), ``α`` default 0.5.
-
-The GraphRAG-traversal baseline and the GNN routers stay stubs.
+  ``α·norm(dense) + (1−α)·norm(sparse)``, ``α`` default 0.5.
+- **Traversal** — reproduces Graph RAG-Tool Fusion's **standard** (no-rerank) method (ADR 0021 +
+  amendment): hybrid initial retrieval → per-tool DFS of ``PARAMETER_*`` dependencies →
+  **block-interleaved** order. It is the **one** router with its own expansion (intrinsic to the
+  method), and it **still** passes through the shared closure stage afterward. The GNN routers stay stubs.
 """
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping, Sequence
 
 import numpy as np
 
-from mcp_router_eval.contracts import ToolSpec
+from mcp_router_eval.contract_layer.invariants import Dep
+from mcp_router_eval.contracts import ORDERING_RELATIONS, ToolScore, ToolSpec
 from mcp_router_eval.data.loader import Dataset
 from mcp_router_eval.embedding.base import Embedder
 from mcp_router_eval.embedding.local import LocalEmbedder
@@ -36,6 +40,7 @@ __all__ = [
     "BM25Router",
     "NaiveRAGRouter",
     "HybridRAGRouter",
+    "TraversalRouter",
     "DEFAULT_TOP_K",
     "tool_document",
 ]
@@ -83,7 +88,7 @@ def _rank_result(
     query_id: str,
     router_name: str,
 ) -> RankResult:
-    """Assemble a :class:`RankResult` from a score vector (shared by every router — no duplication)."""
+    """Assemble a :class:`RankResult` from a score vector (shared by the scoring routers)."""
     ranked = ranked_from_scores(tool_ids, scores)
     selected = [ts.tool_id for ts in ranked[:top_k]]
     confidence = normalize_confidence([ts.score for ts in ranked[:top_k]])
@@ -219,4 +224,105 @@ class HybridRAGRouter(Router):
         return _rank_result(
             self._tool_ids, self.raw_scores(query_text),
             top_k=self._top_k, query_text=query_text, query_id=query_id, router_name=self.name,
+        )
+
+
+# Traversal defaults (Graph RAG-Tool Fusion, ADR 0021 amendment). All are config, recorded per run.
+DEFAULT_INITIAL_K: int = 3   # paper's initial hybrid retrieval top-k
+DEFAULT_D_LIMIT: int = 3     # per-tool DFS depth limit
+DEFAULT_FINAL_TOP_K: int = DEFAULT_TOP_K
+
+
+def _dfs_dependencies(
+    tool: str, tool_deps: Mapping[str, Sequence[Dep]], d_limit: int
+) -> list[str]:
+    """DFS pre-order of ``tool``'s ``PARAMETER_*`` dependencies, up to per-tool depth ``d_limit``.
+
+    Reuses the loader dependency data (``tool_deps``) and :data:`ORDERING_RELATIONS` (ADR 0013): only
+    ``PARAMETER_*`` edges are traversed — ``TOOL_*`` neighbors are never followed (avoids the
+    all-neighbor noise/blow-up GraphRunner warns about). Direct dependencies are depth 1. Neighbors are
+    visited in a stable sorted order so the DFS is **deterministic**; a source already seen in this DFS
+    is not revisited (defensive — the ``PARAMETER_*`` sub-graph is acyclic, ADR 0012).
+    """
+    out: list[str] = []
+    seen: set[str] = set()
+
+    def visit(node: str, depth: int) -> None:
+        if depth > d_limit:
+            return
+        for dep in sorted(tool_deps.get(node, ()), key=lambda d: (d.source, d.relation.value)):
+            if dep.relation in ORDERING_RELATIONS and dep.source not in seen:
+                seen.add(dep.source)
+                out.append(dep.source)
+                visit(dep.source, depth + 1)
+
+    visit(tool, 1)
+    return out
+
+
+class TraversalRouter(Router):
+    """Graph RAG-Tool Fusion, standard/no-rerank (ADR 0021 + 2026-07-05 amendment).
+
+    Algorithm 1: initial hybrid retrieval (top ``k``) → for each retrieved tool, DFS its ``PARAMETER_*``
+    dependencies up to ``d_limit`` (append-if-new) → **block-interleaved** order
+    ``[v1, deps(v1), v2, deps(v2), …]`` de-duplicated (first occurrence wins) and truncated to
+    ``final_top_k``. This interleaving *is* ``ranked_tools`` — it preserves the initial vector order and
+    inserts each tool's dependencies right after it (not a plain closure add, not a score recompute). No
+    LLM reranking (the paper's reranker is optional/gpt-4o; excluded for determinism, ADR 0015).
+
+    Still passes through the shared closure stage afterward (ADR 0021), so final ``selected_tools``
+    closure-completeness is guaranteed identically to every other router.
+    """
+
+    name = "traversal"
+
+    def __init__(
+        self,
+        hybrid: HybridRAGRouter,
+        tool_deps: Mapping[str, Sequence[Dep]],
+        *,
+        k: int = DEFAULT_INITIAL_K,
+        d_limit: int = DEFAULT_D_LIMIT,
+        final_top_k: int = DEFAULT_FINAL_TOP_K,
+    ) -> None:
+        self._hybrid = hybrid
+        self._tool_deps = tool_deps
+        self._k = k
+        self._d_limit = d_limit
+        self._final_top_k = final_top_k
+
+    @property
+    def params(self) -> dict:
+        """The reproducibility parameters (recorded per run; ADR 0021 amendment)."""
+        return {"k": self._k, "d_limit": self._d_limit, "final_top_k": self._final_top_k}
+
+    def rank(self, query_text: str, query_id: str) -> RankResult:
+        initial = self._hybrid.rank(query_text, query_id).ranked_tools
+        vector_top = [ts.tool_id for ts in initial[: self._k]]
+
+        # Block-interleaving: each vector tool immediately followed by its DFS dependencies.
+        interleaved: list[str] = []
+        seen: set[str] = set()
+        for tool in vector_top:
+            if tool not in seen:
+                seen.add(tool)
+                interleaved.append(tool)
+            for dep in _dfs_dependencies(tool, self._tool_deps, self._d_limit):
+                if dep not in seen:
+                    seen.add(dep)
+                    interleaved.append(dep)
+        interleaved = interleaved[: self._final_top_k]
+
+        # Order IS the ranking → positional descending scores (traversal is order-based, not scored).
+        n = len(interleaved)
+        ranked = [ToolScore(tool_id=t, score=float(n - i), rank=i) for i, t in enumerate(interleaved)]
+        # Confidence stays score-based (ADR 0018): from the initial hybrid retrieval scores.
+        confidence = normalize_confidence([ts.score for ts in initial[: self._k]])
+        return RankResult(
+            query_id=query_id,
+            query_text=query_text,
+            ranked_tools=ranked,
+            top_k=interleaved,
+            confidence=confidence,
+            router_name=self.name,
         )
