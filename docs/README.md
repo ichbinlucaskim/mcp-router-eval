@@ -3,7 +3,7 @@
 ## Project status (as of 2026-07-05)
 
 Groundwork: capstone proposal (with a dated post-ground-truth revision) + build-readiness report +
-firsthand ground-truth inspection; **ADRs 0001–0020**; repo scaffold; `scripts/fetch_data.py`
+firsthand ground-truth inspection; **ADRs 0001–0024**; repo scaffold; `scripts/fetch_data.py`
 (dataset pinned to commit `b630b98`).
 
 **Build order is dependency-driven, not §7 phase-number order** (see the proposal's "Build order
@@ -75,19 +75,35 @@ firsthand ground-truth inspection; **ADRs 0001–0020**; repo scaffold; `scripts
   - **Full real path proven** for the dense router too: NaiveRAG → shared closure → invariants → mock
     executor → attribution on `q240` (SUCCESS; dependency-drop → **CONTRACT**).
   - **119 tests green on `main`** (107 prior + 12 `test_routers_vector`).
+- **Done — Router track: traversal baseline (T3)**, on `main` (ADR 0021 + 2026-07-05 amendment):
+  - **`TraversalRouter`** — reproduces **Graph RAG-Tool Fusion**'s standard (no-rerank) method:
+    hybrid initial retrieval → per-tool **DFS** of `PARAMETER_*` deps up to `d_limit` (TOOL_* excluded,
+    ADR 0013) → **block-interleaved** order `[v1, deps(v1), v2, deps(v2), …]` de-duped, truncated to
+    `final_top_k`. No LLM reranking (determinism, ADR 0015); `k`/`d_limit`/`final_top_k` recorded per run.
+  - The **one** router with its own expansion (explicit exception), yet it **still passes through the
+    shared closure stage** — final `selected_tools` closure-completeness identical to every router.
+  - **Thesis premise shown:** traversal surfaces the low-homophily `validate_email` that NaiveRAG buries
+    (rank ≈384); full path → invariants → mock executor → attribution (SUCCESS; drop → **CONTRACT**).
+  - **129 tests green on `main`** (119 prior + 10 `test_routers_traversal`).
+  - **Baselines COMPLETE:** {BM25, NaiveRAG, HybridRAG, Traversal}.
+- **Done — GNN design fully specified (docs)**, on `main` — three ADRs before implementation:
+  **ADR-0022** (query-conditioned node scoring; same BGE query embedding as the baselines),
+  **ADR-0023** (in-batch negatives + a **dependency-structure false-negative filter** — exclude gold
+  tools' `PARAMETER_*` deps; hard negatives conservative), **ADR-0024** (query-level split, tool graph
+  intentionally shared = transductive; leakage prevented by train-only statistics + tuning-only
+  validation; 70/15/15, multi-seed).
 - **Cumulative done:** contract layer (T1) + data pipeline + **executor primary (T2)** + embedding
-  provider + **routers {BM25, NaiveRAG, HybridRAG} + shared closure stage (T3)**.
-- **Current position:** vector baselines done — **entering the traversal baseline** (Graph RAG-Tool
-  Fusion).
-- **Cumulative remaining:** **traversal baseline** (Graph RAG-Tool Fusion) → **GNN**
-  (SAGE / R-GCN / GAT) → **evaluation / attribution wiring** → **SDK replay adapter**
-  (`executor/claude_exec.py`, demonstration only, off the critical path — ADR 0015) → **gate**
-  (deferred).
+  provider + **routers {BM25, NaiveRAG, HybridRAG, Traversal} + shared closure stage (T3)** + **GNN
+  design ADRs (0022/0023/0024)**.
+- **Current position:** baselines complete, **GNN design locked** — **entering the GNN implementation**
+  (R-GCN / GAT / SAGE control, ADR 0010).
+- **Cumulative remaining:** **GNN implementation** → **evaluation** (retrieval metrics + closure-depth
+  slices, ADR 0005) → **SDK replay adapter** (`executor/claude_exec.py`, demonstration only, off the
+  critical path — ADR 0015) → **gate** (deferred).
 - **Deferred — `gate.py` (T1.4):** consumes `confidence` / `homophily_local` (router) and is tuned
   against `completion_rate` (executor), so it is YAGNI until the full router set exists.
-- Still intentional stubs (`raise NotImplementedError`): `routers/gnn.py`, the traversal baseline (not
-  yet written), `embedding/openai_embed.py`, `executor/claude_exec.py`, `eval/*`,
-  `contract_layer/gate.py`.
+- Still intentional stubs (`raise NotImplementedError`): `routers/gnn.py`, `embedding/openai_embed.py`,
+  `executor/claude_exec.py`, `eval/*`, `contract_layer/gate.py`.
 
 ## Standing rule — verify before asserting (all sessions)
 
@@ -140,3 +156,6 @@ Title / Status / Context / Decision / Consequences / Alternatives considered.
 | [0019](adr/0019-hybrid-fusion-convex-combination.md) | Hybrid fusion = convex combination of normalized scores (not RRF); α tunable, default 0.5 | Accepted |
 | [0020](adr/0020-uniform-router-document-text.md) | All routers index/embed the same tool document text (fair method comparison) | Accepted |
 | [0021](adr/0021-traversal-router-expansion.md) | Traversal router keeps its own dependency expansion (explicit exception), then passes through the shared closure | Accepted (amended 2026-07-05) |
+| [0022](adr/0022-gnn-formulation-query-conditioned-scoring.md) | GNN router formulation = query-conditioned node scoring (not link prediction / node classification) | Accepted |
+| [0023](adr/0023-gnn-negative-sampling.md) | GNN negative sampling = in-batch negatives + dependency-structure false-negative filter; hard negatives conservative | Accepted |
+| [0024](adr/0024-gnn-split-and-leakage.md) | GNN split = query-level (transductive graph shared); leakage prevented by train-only stats + tuning-only validation | Accepted |
