@@ -1,9 +1,9 @@
 # Documentation
 
-## Project status (as of 2026-07-01)
+## Project status (as of 2026-07-05)
 
 Groundwork: capstone proposal (with a dated post-ground-truth revision) + build-readiness report +
-firsthand ground-truth inspection; **ADRs 0001–0014**; repo scaffold; `scripts/fetch_data.py`
+firsthand ground-truth inspection; **ADRs 0001–0017**; repo scaffold; `scripts/fetch_data.py`
 (dataset pinned to commit `b630b98`).
 
 **Build order is dependency-driven, not §7 phase-number order** (see the proposal's "Build order
@@ -24,13 +24,28 @@ firsthand ground-truth inspection; **ADRs 0001–0014**; repo scaffold; `scripts
   - **graph_build** (ADR 0006/0013) — PyG `Data(x, edge_index, edge_type)`, `num_relations=4` typed
     edges + `is_core` node feature; `ToolGraph` contract frozen; **RGCNConv forward smoke test green**.
   - **70 tests green on `main`** (37 contract layer + 13 preprocess + 13 loader/integration + 7 graph_build).
-- **Current position:** data pipeline done — **entering the executor (T2)**.
-- **Remaining:** **executor (T2)** (Claude Code via `claude-agent-sdk`, mock tools — NOT skipped) →
-  **routers / GNN (T3)** → **evaluation / attribution wiring** → **gate**.
+- **Done — Executor primary layer (T2)**, on `main` (ADR 0015/0016/0017):
+  - **`executor/mock_tools.py`** — deterministic mock runner (the PRIMARY evaluation substrate;
+    SDK is off the critical path, ADR 0015). Argument synthesis honoring `enum`/`default` (ADR 0016);
+    structural completion verdict (ADR 0004: all required invoked + `PARAMETER_*` order respected +
+    all calls ok); **measured wall-clock latency** reconciling exactly (`total == routing+contract+
+    execution`, ADR 0017 — not fabricated).
+  - **Unsourced-arg availability rule** — a `PARAMETER_*`-sourced required arg is satisfied only if its
+    producer is present *and* ran earlier (structural, not value-threading, ADR 0016 §5); this wires
+    **Scenario B → CONTRACT** (producer absent) and **Scenario C → EXECUTION** (producer runs later).
+  - **loader → mock runner → attribution proven on real `q240`** (Audible spine); `topo_order()`
+    extracted from the loader and reused by the runner. Deterministic failure injection via
+    `arg_overrides` (ADR 0017).
+  - **83 tests green on `main`** (70 prior + 13 new: 10 `test_mock_tools` + 3 `test_integration`).
+- **Cumulative done:** contract layer (T1) + data pipeline + **executor primary (T2)**.
+- **Current position:** executor primary done — **entering the router / GNN (T3)**.
+- **Cumulative remaining:** **routers / GNN (T3)** → **evaluation / attribution wiring** →
+  **SDK replay adapter** (`executor/claude_exec.py`, demonstration only, off the critical path — ADR 0015) →
+  **gate** (deferred).
 - **Deferred — `gate.py` (T1.4):** consumes `confidence` / `homophily_local` (router) and is tuned
-  against `completion_rate` (executor), so it is YAGNI until the router and executor exist.
-- Still intentional stubs (`raise NotImplementedError`): `embedding/*`, `executor/*`, `routers/*`,
-  `eval/*`, `contract_layer/gate.py`.
+  against `completion_rate` (executor), so it is YAGNI until the router exists (the executor now does).
+- Still intentional stubs (`raise NotImplementedError`): `embedding/*`, `executor/claude_exec.py`,
+  `routers/*`, `eval/*`, `contract_layer/gate.py`.
 
 ## Standing rule — verify before asserting (all sessions)
 
