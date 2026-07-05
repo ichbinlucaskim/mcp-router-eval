@@ -159,3 +159,4 @@ Title / Status / Context / Decision / Consequences / Alternatives considered.
 | [0022](adr/0022-gnn-formulation-query-conditioned-scoring.md) | GNN router formulation = query-conditioned node scoring (not link prediction / node classification) | Accepted (amended 2026-07-05) |
 | [0023](adr/0023-gnn-negative-sampling.md) | GNN negative sampling = in-batch negatives + dependency-structure false-negative filter; hard negatives conservative | Accepted |
 | [0024](adr/0024-gnn-split-and-leakage.md) | GNN split = query-level (transductive graph shared); leakage prevented by train-only stats + tuning-only validation | Accepted |
+| [0025](adr/0025-gnn-architecture-hyperparameters.md) | GNN architecture: 2 layers fixed; hidden dim / GAT heads / dropout searched on validation | Accepted |
