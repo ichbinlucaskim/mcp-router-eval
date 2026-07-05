@@ -37,15 +37,30 @@ firsthand ground-truth inspection; **ADRs 0001–0017**; repo scaffold; `scripts
     extracted from the loader and reused by the runner. Deterministic failure injection via
     `arg_overrides` (ADR 0017).
   - **83 tests green on `main`** (70 prior + 13 new: 10 `test_mock_tools` + 3 `test_integration`).
-- **Cumulative done:** contract layer (T1) + data pipeline + **executor primary (T2)**.
-- **Current position:** executor primary done — **entering the router / GNN (T3)**.
-- **Cumulative remaining:** **routers / GNN (T3)** → **evaluation / attribution wiring** →
-  **SDK replay adapter** (`executor/claude_exec.py`, demonstration only, off the critical path — ADR 0015) →
-  **gate** (deferred).
+- **Done — Embedding provider (router-track infra)**, on `main` (ADR 0003):
+  - **`embedding/base.py`** — frozen `Embedder` interface (providers implement `dim`/`version`/`_embed`;
+    the base owns the cache-aware `encode` + on-disk cache + version tag). Cache key =
+    `sha256(version + NUL + text)`; vectors segregated into a per-version sub-dir with a `meta.json`
+    `{version, dim}` record so a model change never mixes with another model's vectors.
+  - **`embedding/local.py`** — `LocalEmbedder` wrapping `BAAI/bge-small-en-v1.5` (384-dim), `eval()` +
+    `no_grad`, **deterministic** (same text → identical vector). `openai_embed.py` stays an
+    interface-satisfying **stub** (ada-002 optional, no paid API).
+  - Cache lives under `data/processed/embeddings/` (regenerable, gitignored). Shared input infra for
+    GNN node features (`x[:, 1:]`) and vector baselines.
+  - **94 tests green on `main`** (83 prior + 11 `test_embedding`).
+- **Cumulative done:** contract layer (T1) + data pipeline + **executor primary (T2)** + embedding provider.
+- **Current position:** embedding infra done — **entering the router track (T3), starting with BM25**.
+- **Cumulative remaining:** **router interface + BM25 baseline** → **vector baselines** (naive / hybrid
+  RAG) → **traversal baseline** (Graph RAG-Tool Fusion) → **GNN** (SAGE / R-GCN / GAT) →
+  **evaluation / attribution wiring** → **SDK replay adapter** (`executor/claude_exec.py`,
+  demonstration only, off the critical path — ADR 0015) → **gate** (deferred).
+- **Note — ADR-0018** (router interface signal contract) lives on the **`router-adr`** branch, **not
+  yet on `main`**; it lands together with the BM25 implementation it grounds (ADR + implementation as
+  one flow). The `main` ADR index therefore ends at 0017.
 - **Deferred — `gate.py` (T1.4):** consumes `confidence` / `homophily_local` (router) and is tuned
   against `completion_rate` (executor), so it is YAGNI until the router exists (the executor now does).
-- Still intentional stubs (`raise NotImplementedError`): `embedding/*`, `executor/claude_exec.py`,
-  `routers/*`, `eval/*`, `contract_layer/gate.py`.
+- Still intentional stubs (`raise NotImplementedError`): `embedding/openai_embed.py`,
+  `executor/claude_exec.py`, `routers/*`, `eval/*`, `contract_layer/gate.py`.
 
 ## Standing rule — verify before asserting (all sessions)
 
