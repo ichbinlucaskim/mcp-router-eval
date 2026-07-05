@@ -94,4 +94,4 @@ Title / Status / Context / Decision / Consequences / Alternatives considered.
 | [0015](adr/0015-executor-mock-primary-sdk-replay.md) | Executor = deterministic mock runner (primary) + claude-agent-sdk replay adapter (demonstration) | Accepted |
 | [0016](adr/0016-mock-arg-synthesis.md) | Mock executor synthesizes args minimally (required, type-valid) honoring enum/default, deterministically | Accepted |
 | [0017](adr/0017-latency-and-failure-injection.md) | Latency = measured wall-clock (not synthetic); failure scenarios deterministic, point-injected | Accepted |
-| [0018](adr/0018-router-interface-signals.md) | Router interface: normalized confidence common to all routers; model-specific signals (homophily) not forced | Accepted |
+| [0018](adr/0018-router-interface-signals.md) | Router interface: normalized confidence common to all routers; model-specific signals (homophily) not forced | Accepted (amended 2026-07-05) |

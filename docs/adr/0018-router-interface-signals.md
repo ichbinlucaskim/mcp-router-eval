@@ -96,3 +96,51 @@ The literature supports both a shared, normalized confidence and *not* forcing m
   <https://arxiv.org/pdf/2404.01012>
 - BEIR — BM25 is a strong baseline that frequently beats dense retrievers out-of-domain:
   <https://www.emergentmind.com/topics/beir-benchmark>
+
+## Amendment 2026-07-05 — closure expansion is a shared post-processing stage, not per-router work
+
+This refines (does **not** overwrite) the original Decision above. The original listed `selected_tools`
+"incl. dependency-closure expansion" among the fields every router fills, which reads as if each router
+performs its own expansion. That is corrected here.
+
+### Amended decision
+
+Dependency-closure expansion is **not** performed inside each router. Routers do **pure ranking only**:
+they produce `ranked_tools` (the full ranking) and their top-k. A **single shared post-processing
+stage** then expands every router's top-k **identically** — adding the `PARAMETER_*` dependency closure
+(reusing the loader's ordering/closure helper, ADR 0012/0013) — and fills `selected_tools` and
+`closure_edges`. The `RouteResult` **contract is unchanged** (same fields, same `[0,1]` normalized
+`confidence`, same GNN-only `homophily_local` sentinel rule); only **who fills** `selected_tools` /
+`closure_edges` changes: **router → shared stage**.
+
+### Rationale (verified sources)
+
+- Retrieval pipelines are **staged** — pre-retrieval / retrieval / post-retrieval — and operations that
+  refine an already-retrieved candidate set (re-ranking, filtering, and here **closure expansion**)
+  belong in the **post-retrieval** stage, not inside the retriever. Modular RAG makes this explicit by
+  "treating each component as an independent module," so a shared refinement step is a first-class
+  pipeline stage rather than retriever-internal logic ([Retrieval-Augmented Generation for LLMs: A
+  Survey — Gao et al., arXiv:2312.10997](https://arxiv.org/abs/2312.10997)). Reasoning-intensive
+  retrieval systems are likewise built as **separable multi-stage modules** (document processing →
+  query expansion → retriever → reranker), reinforcing that expansion is a stage, not part of the
+  ranker ([DIVER, arXiv:2508.07995](https://arxiv.org/abs/2508.07995v1)).
+- **Ablation-hygiene (the decisive reason).** Proposal **ablation A** swaps *only the router* and holds
+  everything else fixed. If each router expanded its own closure, the expansion logic would vary with
+  the router and **contaminate** the comparison — differences in `selected_tools` could come from
+  expansion, not ranking. Extracting expansion into one shared stage guarantees every router receives
+  the **identical** closure, so only **pure ranking quality** is compared. This mirrors how the
+  contract layer already separated invariants/attribution *out of* the routers (ADR 0013 / T1.2–1.3):
+  shared, router-independent work lives in shared stages.
+
+*(Note on sourcing, per the standing rule: the specific claims "closure expansion = post-retrieval per
+MDPI Information 9/12/320" and "DIVER excludes its non-shared module from the main experiments" could
+not be verified this session, so they are **not** asserted here. The staged/modular-pipeline rationale
+is cited from the sources above that were verified; the fairness argument rests on the project's own
+ablation A.)*
+
+### Consequence
+
+Ablation A stays **clean** — expansion is held constant across all routers, so the experiment isolates
+ranking. Every router gets the identical closure. The change is a relocation of *work*, not a contract
+change: `selected_tools` / `closure_edges` remain `RouteResult` fields, now populated by the shared
+post-processing stage. Baselines (BM25, vector, traversal) and the GNN all feed the same expander.
