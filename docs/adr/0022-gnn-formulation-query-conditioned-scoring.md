@@ -90,3 +90,60 @@ specifics, and validate on our own benchmark.
 
 *(All four are document / knowledge / QA graphs, not tool-dependency graphs — the architectural pattern
 transfers, the task does not; see the honest-limitation note in Context.)*
+
+## Amendment 2026-07-05 — scoring is late cosine (a two-tower design), not a query-node fusion MLP
+
+This refines (does **not** overwrite) the Decision above by pinning down what the scoring function is,
+before implementation. The original phrase "`cos(query, node)` combined with a **learned scoring head**"
+could be misread as an MLP that ingests the query and node embeddings *together*. It is not.
+
+### Scoring is late cosine
+
+`score(query, tool) = cos( query_embedding , GNN-refined node_embedding )`. The two sides are computed
+**independently** — the query tower is the BGE embedding (ADR 0003); the tool tower is the GNN encoder
+over the dependency graph — and the **only** cross-tower interaction is this output cosine. There is
+**no** MLP that takes the query and node embeddings jointly (no cross-attention, no query-node fusion
+layer). This is a **two-tower** design.
+
+### What "learned scoring head" actually means here
+
+The learned parameters are: (1) the **GNN encoder weights** that produce the graph-refined node
+embeddings, and *optionally* (2) a **per-tower linear projection** that maps each side into one shared
+space, with **L2 normalization** before the cosine. Both are per-tower (they touch one side only) — the
+towers stay independent. There is **no** query×node fusion network.
+
+### Rationale (verified sources)
+
+- A two-tower model is **late-interaction by construction**: "user and item features do not mix until
+  the similarity stage" — the cross-tower exchange is restricted to the output similarity
+  ([Two-Tower Models, Kumo.ai](https://kumo.ai/pyg/concepts/two-tower-model/); [two-tower retrieval
+  overview](https://www.emergentmind.com/topics/two-tower-retrieval)).
+- **Cosine keeps the towers independent** and is the standard efficient choice — it "keeps the
+  two-towers independent and allows offline indexing and efficient serving via ANN"
+  ([Etsy Unified Embedding, arXiv:2306.04833](https://arxiv.org/abs/2306.04833)); the key design
+  principle of two-tower retrieval is precisely to keep the query and item embeddings **independent**
+  after training, scored at the output ([end-to-end e-commerce two-tower,
+  arXiv:2006.02282](https://arxiv.org/abs/2006.02282)).
+- **Cross-attention / fusion scoring is richer but `O(N)`** and belongs to a **later ranking** stage,
+  not first-stage retrieval — in practice two towers retrieve, a cross-attention re-ranker ranks
+  ([Kumo.ai](https://kumo.ai/pyg/concepts/two-tower-model/)). Our router is a first-stage retriever, so
+  late cosine is the right tier.
+- **Decisive for us (fairness).** NaiveRAG already scores by **cosine** against the shared BGE
+  embedding (ADR 0003 / 0020). If the GNN also scores by cosine against that same query embedding, the
+  **only** difference between NaiveRAG and the GNN is the **graph refinement** of the tool tower — so a
+  GNN win is attributable to the graph, not to a more expressive scorer. A query-node fusion MLP would
+  confound that comparison (it adds scorer capacity on top of the graph).
+
+### Honest correction
+
+The original "cos + learned scoring head" wording is hereby read as **late cosine with the GNN encoder
+(and an optional per-tower projection) as the only learned parts** — *not* a query-node fusion MLP. The
+"concatenate the query into node features" alternative in the original Alternatives section remains an
+open ablation; it is a *conditioning* variant, still scored by late cosine, not a fusion scorer.
+
+### Honest limitation
+
+The cited sources are **recommendation / search two-tower** systems, not a GNN over a tool-dependency
+graph. The **"GNN-as-tower-encoder + late cosine"** pattern is established (Kumo.ai's GNN-enhanced
+two-tower; the well-known PinSage GNN-embedding system is a familiar instance), but none is exactly our
+tool-routing setting — we adopt the pattern and validate on our own benchmark.
