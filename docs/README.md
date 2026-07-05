@@ -3,7 +3,7 @@
 ## Project status (as of 2026-07-05)
 
 Groundwork: capstone proposal (with a dated post-ground-truth revision) + build-readiness report +
-firsthand ground-truth inspection; **ADRs 0001–0024**; repo scaffold; `scripts/fetch_data.py`
+firsthand ground-truth inspection; **ADRs 0001–0027**; repo scaffold; `scripts/fetch_data.py`
 (dataset pinned to commit `b630b98`).
 
 **Build order is dependency-driven, not §7 phase-number order** (see the proposal's "Build order
@@ -86,23 +86,36 @@ firsthand ground-truth inspection; **ADRs 0001–0024**; repo scaffold; `scripts
     (rank ≈384); full path → invariants → mock executor → attribution (SUCCESS; drop → **CONTRACT**).
   - **129 tests green on `main`** (119 prior + 10 `test_routers_traversal`).
   - **Baselines COMPLETE:** {BM25, NaiveRAG, HybridRAG, Traversal}.
-- **Done — GNN design fully specified (docs)**, on `main` — three ADRs before implementation:
-  **ADR-0022** (query-conditioned node scoring; same BGE query embedding as the baselines),
-  **ADR-0023** (in-batch negatives + a **dependency-structure false-negative filter** — exclude gold
-  tools' `PARAMETER_*` deps; hard negatives conservative), **ADR-0024** (query-level split, tool graph
-  intentionally shared = transductive; leakage prevented by train-only statistics + tuning-only
-  validation; 70/15/15, multi-seed).
+- **Done — GNN router complete (T3)**, on `main` — design **and** implementation across
+  ADR 0010 / 0022 (+amendment) / 0023 / 0024 / 0025 / 0026 / 0027:
+  - **Stage 1 — models (`routers/gnn_models.py`):** three **2-layer** backbones (R-GCN `num_relations=4`,
+    GAT heads-2, SAGE control; ADR 0010/0025); node features fill graph_build's `x[:, 1:]` with BGE
+    embeddings of `tool_document()` (ADR 0020); **late-cosine two-tower** scorer (per-tower L2 + optional
+    per-tower projection, **no query-node fusion MLP**; ADR 0022 amendment).
+  - **Stage 2 — vectorized training (`routers/gnn_train.py`):** query-level split (ADR 0024, train-only
+    stats), masked **InfoNCE** (ADR 0026) with the dependency-structure false-negative mask (ADR 0023),
+    **AdamW**. Built to the profiling findings: **one GNN forward per step**, **precomputed
+    `[Q×N]` mask**, **batch-embedded queries**, **matmul scoring** — all identical-result fast paths.
+  - **Stage 3 — router (`routers/gnn.py`):** `GNNRouter` loads a checkpoint, ranks by late-cosine
+    matmul (**pure ranking** + shared closure, ADR 0018/0021), min-max confidence (ADR 0018), and
+    computes a **real `homophily_local`** (ADR 0027: mean cosine to `PARAMETER_*` deps; sentinel for
+    dependency-free tools). Full-pipeline integration proven (GNNRouter → closure → invariants →
+    executor → attribution). Deterministic; checkpoints gitignored.
+  - **162 tests green on `main`** (152 prior + 10 `test_gnn_router`; GNN stages add 33 tests total).
+- **Five routers now stand behind one contract:** {BM25, NaiveRAG, HybridRAG, Traversal, GNN}.
 - **Cumulative done:** contract layer (T1) + data pipeline + **executor primary (T2)** + embedding
-  provider + **routers {BM25, NaiveRAG, HybridRAG, Traversal} + shared closure stage (T3)** + **GNN
-  design ADRs (0022/0023/0024)**.
-- **Current position:** baselines complete, **GNN design locked** — **entering the GNN implementation**
-  (R-GCN / GAT / SAGE control, ADR 0010).
-- **Cumulative remaining:** **GNN implementation** → **evaluation** (retrieval metrics + closure-depth
-  slices, ADR 0005) → **SDK replay adapter** (`executor/claude_exec.py`, demonstration only, off the
-  critical path — ADR 0015) → **gate** (deferred).
+  provider + **routers {BM25, NaiveRAG, HybridRAG, Traversal, GNN} + shared closure stage (T3)** +
+  **full GNN (design ADRs 0022–0027 + implementation stages 1–3)**.
+- **Current position:** **all five routers implemented behind the same contract** — **entering the
+  evaluation harness** (the north-star: structural completion + retrieval→completion transfer-loss
+  comparison across all five routers).
+- **Cumulative remaining:** **evaluation** (retrieval metrics + closure-depth slices, ADR 0005; the
+  north-star structural-completion + transfer-loss comparison across all five routers) → **SDK replay
+  adapter** (`executor/claude_exec.py`, demonstration only, off the critical path — ADR 0015) →
+  **gate** (deferred).
 - **Deferred — `gate.py` (T1.4):** consumes `confidence` / `homophily_local` (router) and is tuned
-  against `completion_rate` (executor), so it is YAGNI until the full router set exists.
-- Still intentional stubs (`raise NotImplementedError`): `routers/gnn.py`, `embedding/openai_embed.py`,
+  against `completion_rate` (executor); the full router set now exists, so it unblocks alongside the gate.
+- Still intentional stubs (`raise NotImplementedError`): `embedding/openai_embed.py`,
   `executor/claude_exec.py`, `eval/*`, `contract_layer/gate.py`.
 
 ## Standing rule — verify before asserting (all sessions)
