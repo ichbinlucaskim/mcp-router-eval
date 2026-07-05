@@ -3,7 +3,7 @@
 ## Project status (as of 2026-07-05)
 
 Groundwork: capstone proposal (with a dated post-ground-truth revision) + build-readiness report +
-firsthand ground-truth inspection; **ADRs 0001–0018**; repo scaffold; `scripts/fetch_data.py`
+firsthand ground-truth inspection; **ADRs 0001–0020**; repo scaffold; `scripts/fetch_data.py`
 (dataset pinned to commit `b630b98`).
 
 **Build order is dependency-driven, not §7 phase-number order** (see the proposal's "Build order
@@ -62,19 +62,32 @@ firsthand ground-truth inspection; **ADRs 0001–0018**; repo scaffold; `scripts
   - **Full real path proven:** BM25 → shared closure → `RouteResult` → invariants → mock executor →
     attribution on `q240` (SUCCESS; and a dependency-drop → **CONTRACT** through the *real* router).
   - **107 tests green on `main`** (94 prior + 13 `test_routers_bm25`).
+- **Done — Router track: vector baselines (T3)**, on `main` (ADR 0003 / 0018 / 0019 / 0020):
+  - **`NaiveRAGRouter`** — dense cosine over the embedding provider (LocalEmbedder BGE); **first real
+    use of the embedding provider**, reusing its versioned cache so the 573 tool vectors are computed
+    once. Pure ranking (ADR 0018); deterministic.
+  - **`HybridRAGRouter`** — **convex-combination fusion** (ADR 0019):
+    `α·norm(dense) + (1−α)·norm(sparse)` over min-max-normalized scores (ADR 0018), `α` default 0.5,
+    configurable. Endpoints reduce exactly to the pure rankers (`α=0` → BM25, `α=1` → NaiveRAG).
+  - **Same-text guarantee (ADR 0020):** every router (BM25, NaiveRAG, HybridRAG) embeds/indexes the
+    **identical** `tool_document()` text, so the comparison isolates method, not input. Single vector
+    `minmax_normalize` shared by confidence + fusion.
+  - **Full real path proven** for the dense router too: NaiveRAG → shared closure → invariants → mock
+    executor → attribution on `q240` (SUCCESS; dependency-drop → **CONTRACT**).
+  - **119 tests green on `main`** (107 prior + 12 `test_routers_vector`).
 - **Cumulative done:** contract layer (T1) + data pipeline + **executor primary (T2)** + embedding
-  provider + **router interface + shared closure + BM25 baseline (T3, first router)**.
-- **Current position:** first router done — **entering the vector baselines** (naive / hybrid RAG), the
-  first real consumer of the embedding provider.
-- **Cumulative remaining:** **vector baselines** (naive / hybrid RAG) → **traversal baseline**
-  (Graph RAG-Tool Fusion) → **GNN** (SAGE / R-GCN / GAT) → **evaluation / attribution wiring** →
-  **SDK replay adapter** (`executor/claude_exec.py`, demonstration only, off the critical path —
-  ADR 0015) → **gate** (deferred).
+  provider + **routers {BM25, NaiveRAG, HybridRAG} + shared closure stage (T3)**.
+- **Current position:** vector baselines done — **entering the traversal baseline** (Graph RAG-Tool
+  Fusion).
+- **Cumulative remaining:** **traversal baseline** (Graph RAG-Tool Fusion) → **GNN**
+  (SAGE / R-GCN / GAT) → **evaluation / attribution wiring** → **SDK replay adapter**
+  (`executor/claude_exec.py`, demonstration only, off the critical path — ADR 0015) → **gate**
+  (deferred).
 - **Deferred — `gate.py` (T1.4):** consumes `confidence` / `homophily_local` (router) and is tuned
   against `completion_rate` (executor), so it is YAGNI until the full router set exists.
-- Still intentional stubs (`raise NotImplementedError`): `routers/gnn.py` and the remaining
-  `routers/baselines.py` baselines (vector / traversal, not yet written), `embedding/openai_embed.py`,
-  `executor/claude_exec.py`, `eval/*`, `contract_layer/gate.py`.
+- Still intentional stubs (`raise NotImplementedError`): `routers/gnn.py`, the traversal baseline (not
+  yet written), `embedding/openai_embed.py`, `executor/claude_exec.py`, `eval/*`,
+  `contract_layer/gate.py`.
 
 ## Standing rule — verify before asserting (all sessions)
 
