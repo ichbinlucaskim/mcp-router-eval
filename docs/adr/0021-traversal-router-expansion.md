@@ -81,3 +81,50 @@ Three further findings shape the design:
   patterns matched to traversal): <https://arxiv.org/abs/2504.02112>
 - GraphRunner — connecting all neighbors regardless of edge type injects noise and blows up the
   subgraph: <https://arxiv.org/abs/2507.08945>
+
+## Amendment 2026-07-05 — exact method (block-interleaving) and reranking excluded
+
+This refines (does **not** overwrite) the Decision above by pinning the *exact* traversal algorithm to
+the origin paper and recording that the paper's optional LLM reranker is excluded. Verified against
+Graph RAG-Tool Fusion's Algorithm 1 and §7.1 ([arXiv:2502.07223](https://arxiv.org/abs/2502.07223)).
+
+### Exact method (Algorithm 1)
+
+1. **Initial hybrid retrieval** — take the top-k tools from hybrid retrieval (reuse `HybridRAGRouter`,
+   ADR 0019). The paper uses `k = 3`.
+2. **Per-tool DFS for dependencies** — for each retrieved tool `t`, depth-first-search its
+   `PARAMETER_*` dependencies up to a per-tool depth limit `d_limit`, appending each dependency **only
+   if not already in the list**. Paper's Algorithm 1, verbatim:
+   > "for each tool d ∈ DFS(t, KG) up to d_limit do / if d ∉ S_graph_list then / Append d to
+   > S_graph_list"
+3. **Block-interleaving order** — tools are processed sequentially and each retrieved tool is
+   **immediately followed by its own dependencies**, i.e. `[vector tool 1, its deps]`, then
+   `[vector tool 2, its deps]`, … concatenated into one de-duplicated list, then **truncated to the
+   final top-K**:
+   > "Limit S_graph_list to final_top_K"
+
+This is **neither a plain closure add nor a score recompute**: it **preserves the initial vector
+ranking order** and inserts each tool's dependencies directly after it. The block-interleaving *is* the
+router's ranking output (its `ranked_tools` / top-k).
+
+### Reranking excluded
+
+The paper reports two configurations — **standard** ("no RR") and **+reranking** ("w/ RR", ~7–14%
+absolute mAP@10 gain). The reranker is **LLM-based** (gpt-4o-2024-08-06) and **optional**. It conflicts
+with our determinism / low-cost stance (ADR 0015), so this baseline reproduces the **standard,
+no-reranking** version. LLM reranking is recorded as **future work only**, not implemented.
+
+### Rationale
+
+§7.1 states the premise our whole thesis rests on: *"Since tool dependencies are often semantically
+unrelated to the main tool, naïve RAG struggles to retrieve all relevant dependencies."* — i.e.
+**low-homophily dependencies** are exactly what graph traversal recovers and dense/lexical ranking
+misses. Reproducing Algorithm 1's interleaved DFS traversal is therefore essential to represent that
+method faithfully.
+
+### Relationship to the original 0021 decision
+
+Consistent with ADR 0021: the **block-interleaving is the router's method** (its ranking), and the
+**shared closure stage still runs afterward** to guarantee final `selected_tools` closure-completeness
+identically to every other router. Edges stay `PARAMETER_*`-centric (ADR 0013); `d_limit` is the
+paper's **per-tool depth parameter** (recorded per run for reproducibility).
