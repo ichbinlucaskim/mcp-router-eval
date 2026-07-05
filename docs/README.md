@@ -125,3 +125,4 @@ Title / Status / Context / Decision / Consequences / Alternatives considered.
 | [0017](adr/0017-latency-and-failure-injection.md) | Latency = measured wall-clock (not synthetic); failure scenarios deterministic, point-injected | Accepted |
 | [0018](adr/0018-router-interface-signals.md) | Router interface: normalized confidence common to all routers; model-specific signals (homophily) not forced | Accepted (amended 2026-07-05) |
 | [0019](adr/0019-hybrid-fusion-convex-combination.md) | Hybrid fusion = convex combination of normalized scores (not RRF); α tunable, default 0.5 | Accepted |
+| [0020](adr/0020-uniform-router-document-text.md) | All routers index/embed the same tool document text (fair method comparison) | Accepted |
