@@ -28,7 +28,14 @@ import numpy as np
 
 from mcp_router_eval.contracts import ToolScore
 
-__all__ = ["HOMOPHILY_NA", "RankResult", "Router", "normalize_confidence", "ranked_from_scores"]
+__all__ = [
+    "HOMOPHILY_NA",
+    "RankResult",
+    "Router",
+    "minmax_normalize",
+    "normalize_confidence",
+    "ranked_from_scores",
+]
 
 #: Sentinel written into ``RouteResult.homophily_local`` by non-GNN routers (ADR 0018). ``homophily``
 #: is a GNN-specific signal; ``0.0`` here means "not applicable", NOT a computed neighbor similarity.
@@ -58,22 +65,34 @@ class Router(ABC):
         """Rank all tools for ``query_text`` and return the full ranking + top-k (no closure)."""
 
 
-def normalize_confidence(topk_scores: Sequence[float]) -> float:
-    """Min-max normalize the top-k candidate scores and summarize to a single ``[0,1]`` confidence.
+def minmax_normalize(scores: Sequence[float]) -> np.ndarray:
+    """Min-max normalize scores to ``[0,1]``: ``(s − m)/(M − m)`` (RIRAG, ADR 0018).
 
-    Uses ``(s − m)/(M − m)`` over the top-k window (RIRAG, ADR 0018) and returns the **mean** of the
-    normalized top-k — one comparable self-estimate, computed the identical way for every router.
-
-    Degenerate rule (ADR 0018): when the window is empty or all scores are equal (``M == m``), there is
-    no spread to normalize, so a documented constant ``1.0`` is returned instead of dividing by zero.
+    The single min-max implementation, reused for both the confidence self-estimate and hybrid
+    convex-combination fusion (ADR 0019). Degenerate rule (ADR 0018): an all-equal window (``M == m``)
+    has no spread, so every element maps to the constant ``1.0`` rather than dividing by zero; an empty
+    input returns an empty array.
     """
-    arr = np.asarray(topk_scores, dtype=float)
+    arr = np.asarray(scores, dtype=float)
     if arr.size == 0:
-        return 1.0
+        return arr
     lo, hi = float(arr.min()), float(arr.max())
     if hi == lo:
+        return np.ones_like(arr)
+    return (arr - lo) / (hi - lo)
+
+
+def normalize_confidence(topk_scores: Sequence[float]) -> float:
+    """Summarize the top-k candidate scores to a single ``[0,1]`` confidence (ADR 0018).
+
+    Min-max normalizes the top-k window (:func:`minmax_normalize`) and returns the **mean** of the
+    normalized scores — one comparable self-estimate, computed the identical way for every router.
+    Empty or all-equal windows return the documented constant ``1.0`` (degenerate rule).
+    """
+    normed = minmax_normalize(topk_scores)
+    if normed.size == 0:
         return 1.0
-    return float(((arr - lo) / (hi - lo)).mean())
+    return float(normed.mean())
 
 
 def ranked_from_scores(tool_ids: Sequence[str], scores: Sequence[float]) -> list[ToolScore]:
