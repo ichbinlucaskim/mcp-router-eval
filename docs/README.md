@@ -77,3 +77,4 @@ Title / Status / Context / Decision / Consequences / Alternatives considered.
 | [0013](adr/0013-edge-type-functional-split.md) | Edge functional split: PARAMETER_* = ordering (acyclic), TOOL_* = router representation | Accepted |
 | [0014](adr/0014-processed-artifact-format.md) | Processed artifacts = JSONL + JSON metadata (not parquet) at this scale | Accepted |
 | [0015](adr/0015-executor-mock-primary-sdk-replay.md) | Executor = deterministic mock runner (primary) + claude-agent-sdk replay adapter (demonstration) | Accepted |
+| [0016](adr/0016-mock-arg-synthesis.md) | Mock executor synthesizes args minimally (required, type-valid) honoring enum/default, deterministically | Accepted |
