@@ -231,6 +231,7 @@ Each task lists **input → output → done-when**.
 
 - **T2.1** Wire Claude Code (Anthropic Agent SDK) as executor behind the contract interface.
     - in: ExecPlan → out: ExecResult with call_trace → done-when: a single-tool query runs end-to-end and returns `completed`.
+    - *Execution model refined — see ADR-0015 (deterministic mock runner is primary; SDK exercised via replay).*
 - **T2.2** Implement per-layer latency + trace logging.
     - in: live run → out: latency dict + trace → done-when: latency sums reconcile to total.
 - **T2.3** Bound the execution sample (pick 1–2 domains, curate composite queries).
