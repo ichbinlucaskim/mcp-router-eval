@@ -57,6 +57,7 @@ __all__ = [
     "split_queries",
     "build_masks",
     "masked_infonce",
+    "build_scorer",
     "set_seed",
 ]
 
@@ -168,6 +169,20 @@ class GNNTrainConfig:
     seed: int = 0
 
 
+def build_scorer(config: GNNTrainConfig, in_dim: int, query_dim: int) -> GNNScorer:
+    """Build the backbone encoder + late-cosine scorer from a config (shared by the trainer + router).
+
+    The single place a ``GNNScorer`` is constructed from a :class:`GNNTrainConfig`, so a checkpoint's
+    saved config reconstructs the identical architecture before ``load_state_dict`` (ADR 0025/0022).
+    """
+    cls = _BACKBONES[config.backbone]
+    kw: dict = {"hidden": config.hidden, "dropout": config.dropout}
+    if config.backbone == "gat":
+        kw["heads"] = config.heads
+    encoder = cls(in_dim, **kw)
+    return GNNScorer(encoder, query_dim=query_dim, proj_dim=config.proj_dim)
+
+
 @dataclass
 class GNNTrainer:
     """Trains one backbone on the query-level split; vectorized (one forward/step, matmul scoring)."""
@@ -219,12 +234,7 @@ class GNNTrainer:
         return torch.as_tensor(vecs, dtype=torch.float)
 
     def _build_scorer(self, query_dim: int) -> GNNScorer:
-        cls = _BACKBONES[self.config.backbone]
-        kw: dict = {"hidden": self.config.hidden, "dropout": self.config.dropout}
-        if self.config.backbone == "gat":
-            kw["heads"] = self.config.heads
-        encoder = cls(self._x.shape[1], **kw)
-        return GNNScorer(encoder, query_dim=query_dim, proj_dim=self.config.proj_dim)
+        return build_scorer(self.config, self._x.shape[1], query_dim)
 
     def _build_scheduler(self):
         if self.config.scheduler == "plateau":
