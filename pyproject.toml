@@ -21,6 +21,7 @@ dependencies = [
     "rank-bm25",
     "sentence-transformers",
     "claude-agent-sdk",
+    "jsonschema",
     "pyyaml",
 ]
 

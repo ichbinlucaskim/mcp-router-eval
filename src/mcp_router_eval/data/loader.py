@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import json
 from collections import defaultdict, deque
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -29,7 +29,45 @@ from mcp_router_eval.contracts import ORDERING_RELATIONS, EdgeType, ToolSpec
 _PKG_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 PROCESSED_DIR = _PKG_ROOT / "data" / "processed"
 
-__all__ = ["Query", "Dataset", "load"]
+__all__ = ["Query", "Dataset", "load", "topo_order"]
+
+
+def topo_order(gold: Sequence[str], tool_deps: Mapping[str, Sequence[Dep]]) -> list[str]:
+    """Topologically valid run order (deps first) for ``gold`` using ``PARAMETER_*`` edges only.
+
+    The shared kernel behind :meth:`Dataset.execution_order`; extracted so the executor (Layer 3)
+    can reuse the exact ordering helper without carrying a whole :class:`Dataset` (ADR 0012/0013).
+    Ties are broken by tool_id (``sorted``) so the order is **deterministic**. Raises ``ValueError``
+    if the sub-slice contains a cycle (defensive; preprocess already guarantees global acyclicity).
+    """
+    nodes = set(gold)
+    # u depends on v (PARAMETER_* only, restricted to the gold set)
+    deps_in: dict[str, set[str]] = {
+        u: {
+            d.source
+            for d in tool_deps.get(u, ())
+            if d.relation in ORDERING_RELATIONS and d.source in nodes
+        }
+        for u in nodes
+    }
+    indeg = {u: len(deps_in[u]) for u in nodes}
+    dependents: dict[str, set[str]] = defaultdict(set)
+    for u in nodes:
+        for v in deps_in[u]:
+            dependents[v].add(u)
+    q = deque(sorted(u for u in nodes if indeg[u] == 0))
+    order: list[str] = []
+    while q:
+        n = q.popleft()
+        order.append(n)
+        for u in sorted(dependents[n]):
+            indeg[u] -= 1
+            if indeg[u] == 0:
+                q.append(u)
+    if len(order) != len(nodes):
+        cyclic = sorted(n for n in nodes if indeg[n] > 0)
+        raise ValueError(f"PARAMETER_* cycle within gold set: {cyclic}")
+    return order
 
 
 @dataclass(frozen=True)
@@ -64,34 +102,7 @@ class Dataset:
         list order is ignored. Raises ValueError if the sub-slice contains a cycle (defensive; the
         preprocess hook already guarantees the global PARAMETER_* sub-graph is acyclic).
         """
-        nodes = set(gold)
-        # u depends on v (PARAMETER_* only, restricted to the gold set)
-        deps_in: dict[str, set[str]] = {
-            u: {
-                d.source
-                for d in self.tool_deps.get(u, ())
-                if d.relation in ORDERING_RELATIONS and d.source in nodes
-            }
-            for u in nodes
-        }
-        indeg = {u: len(deps_in[u]) for u in nodes}
-        dependents: dict[str, set[str]] = defaultdict(set)
-        for u in nodes:
-            for v in deps_in[u]:
-                dependents[v].add(u)
-        q = deque(sorted(u for u in nodes if indeg[u] == 0))
-        order: list[str] = []
-        while q:
-            n = q.popleft()
-            order.append(n)
-            for u in sorted(dependents[n]):
-                indeg[u] -= 1
-                if indeg[u] == 0:
-                    q.append(u)
-        if len(order) != len(nodes):
-            cyclic = sorted(n for n in nodes if indeg[n] > 0)
-            raise ValueError(f"PARAMETER_* cycle within gold set: {cyclic}")
-        return order
+        return topo_order(gold, self.tool_deps)
 
 
 def _require(path: Path) -> Path:
