@@ -8,8 +8,18 @@ import pytest
 
 from mcp_router_eval.contract_layer.attribution import attribute
 from mcp_router_eval.contract_layer.invariants import check_invariants
-from mcp_router_eval.contracts import Blame, ExecResult, LatencyMs, Outcome, RouteResult, ToolCall
+from mcp_router_eval.contracts import (
+    Blame,
+    ExecPlan,
+    ExecResult,
+    GateDecision,
+    LatencyMs,
+    Outcome,
+    RouteResult,
+    ToolCall,
+)
 from mcp_router_eval.data.loader import Dataset, load
+from mcp_router_eval.executor.mock_tools import run as mock_run
 
 pytestmark = pytest.mark.skipif(
     not (Path("data/processed") / "tools.jsonl").exists(),
@@ -98,3 +108,63 @@ def test_success_path_blame_none(ds):
     )
     att = attribute(route, result, rep, required_tools=q.required_tools)
     assert att.outcome is Outcome.SUCCESS and att.blame is Blame.NONE
+
+
+# --------------------------------------------------------------------------- #
+# loader → MOCK RUNNER → attribution (the real executor in the loop, real data)
+# --------------------------------------------------------------------------- #
+def _plan(ds, order, rep):
+    """ExecPlan whose bound_tools are presented in ``order`` (== the runner's call order)."""
+    q = ds.query_by_id("q240")
+    return ExecPlan(
+        query_id=q.query_id, query_text=q.query_text,
+        bound_tools=[ds.tools[t] for t in order], invariant_report=rep,
+        gate_decision=GateDecision.PASS, trace_id="t-q240",
+    )
+
+
+def test_mock_runner_success_end_to_end(ds):
+    """Full gold, topo order → mock runner completes → SUCCESS / NONE (real executor in the loop)."""
+    q = ds.query_by_id("q240")
+    order = ds.execution_order(q.required_tools)          # topo (deps first)
+    route = _route(q, q.required_tools)
+    rep = check_invariants(route, ds.tool_deps)
+    res = mock_run(_plan(ds, order, rep), ds.tool_deps, q.required_tools)
+    assert res.completed is True
+    att = attribute(route, res, rep, required_tools=q.required_tools)
+    assert att.outcome is Outcome.SUCCESS and att.blame is Blame.NONE
+
+
+def test_mock_runner_scenario_B_contract(ds):
+    """Drop the param-source validate_email → runner call fails (unsourced email) → CONTRACT (B).
+
+    validate_email is treated as a *dependency* of a selected tool (required_tools = the reduced
+    selection), isolating CONTRACT from ROUTING per the completion-scoring doc.
+    """
+    q = ds.query_by_id("q240")
+    selected = [t for t in q.required_tools if t != "validate_email"]
+    order = ds.execution_order(selected)                  # topo over the reduced set
+    route = _route(q, selected)
+    rep = check_invariants(route, ds.tool_deps)           # dangling audible_account_login.email
+    res = mock_run(_plan(ds, order, rep), ds.tool_deps, selected)
+    assert res.completed is False
+    login = next(c for c in res.call_trace if c.tool_id == "audible_account_login")
+    assert login.ok is False and "email" in login.error  # producer validate_email absent
+    att = attribute(route, res, rep, required_tools=selected)
+    assert att.outcome is Outcome.FAILURE and att.blame is Blame.CONTRACT
+    assert "audible_account_login.email" in att.evidence
+
+
+def test_mock_runner_scenario_C_execution(ds):
+    """Full closure but reversed order → main runs before its param-source → EXECUTION (C)."""
+    q = ds.query_by_id("q240")
+    order = list(reversed(ds.execution_order(q.required_tools)))  # main-first: order violated
+    route = _route(q, q.required_tools)
+    rep = check_invariants(route, ds.tool_deps)           # closure intact (all selected)
+    assert rep.closure_complete is True
+    res = mock_run(_plan(ds, order, rep), ds.tool_deps, q.required_tools)
+    assert res.completed is False
+    dl = next(c for c in res.call_trace if c.tool_id == "download_audible_book")
+    assert dl.ok is False and "session_id" in dl.error    # audible_account_login has not run yet
+    att = attribute(route, res, rep, required_tools=q.required_tools)
+    assert att.outcome is Outcome.FAILURE and att.blame is Blame.EXECUTION
