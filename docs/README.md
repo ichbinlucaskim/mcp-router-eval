@@ -3,7 +3,7 @@
 ## Project status (as of 2026-07-05)
 
 Groundwork: capstone proposal (with a dated post-ground-truth revision) + build-readiness report +
-firsthand ground-truth inspection; **ADRs 0001–0017**; repo scaffold; `scripts/fetch_data.py`
+firsthand ground-truth inspection; **ADRs 0001–0018**; repo scaffold; `scripts/fetch_data.py`
 (dataset pinned to commit `b630b98`).
 
 **Build order is dependency-driven, not §7 phase-number order** (see the proposal's "Build order
@@ -48,19 +48,33 @@ firsthand ground-truth inspection; **ADRs 0001–0017**; repo scaffold; `scripts
   - Cache lives under `data/processed/embeddings/` (regenerable, gitignored). Shared input infra for
     GNN node features (`x[:, 1:]`) and vector baselines.
   - **94 tests green on `main`** (83 prior + 11 `test_embedding`).
-- **Cumulative done:** contract layer (T1) + data pipeline + **executor primary (T2)** + embedding provider.
-- **Current position:** embedding infra done — **entering the router track (T3), starting with BM25**.
-- **Cumulative remaining:** **router interface + BM25 baseline** → **vector baselines** (naive / hybrid
-  RAG) → **traversal baseline** (Graph RAG-Tool Fusion) → **GNN** (SAGE / R-GCN / GAT) →
-  **evaluation / attribution wiring** → **SDK replay adapter** (`executor/claude_exec.py`,
-  demonstration only, off the critical path — ADR 0015) → **gate** (deferred).
-- **Note — ADR-0018** (router interface signal contract) lives on the **`router-adr`** branch, **not
-  yet on `main`**; it lands together with the BM25 implementation it grounds (ADR + implementation as
-  one flow). The `main` ADR index therefore ends at 0017.
+- **Done — Router track: first router (T3)**, on `main` (ADR 0018 + 2026-07-05 amendment):
+  - **`routers/base.py`** — frozen `Router` interface: `rank(query) → RankResult` is **pure ranking**
+    (full `ranked_tools` + top-k), **no closure**. Shared helpers: min-max `normalize_confidence` to
+    `[0,1]` over the top-k window with the `M==m`/empty → `1.0` degenerate rule; `HOMOPHILY_NA`
+    sentinel (`0.0`, n/a) for non-GNN routers (ADR 0018).
+  - **`routers/closure.py`** — the **single shared post-processing stage** (ADR 0018 amendment):
+    expands any router's top-k with the transitive `PARAMETER_*` closure only (TOOL_* excluded,
+    ADR 0013; reuses `topo_order`), then assembles the `RouteResult`. Identical for every router →
+    ablation-A isolates ranking quality.
+  - **`routers/baselines.py`** — **BM25Router** over tool documents (tool_id words + param
+    descriptions), **tuned `k1=0.9, b=0.4`** (not library defaults, ADR 0018); deterministic.
+  - **Full real path proven:** BM25 → shared closure → `RouteResult` → invariants → mock executor →
+    attribution on `q240` (SUCCESS; and a dependency-drop → **CONTRACT** through the *real* router).
+  - **107 tests green on `main`** (94 prior + 13 `test_routers_bm25`).
+- **Cumulative done:** contract layer (T1) + data pipeline + **executor primary (T2)** + embedding
+  provider + **router interface + shared closure + BM25 baseline (T3, first router)**.
+- **Current position:** first router done — **entering the vector baselines** (naive / hybrid RAG), the
+  first real consumer of the embedding provider.
+- **Cumulative remaining:** **vector baselines** (naive / hybrid RAG) → **traversal baseline**
+  (Graph RAG-Tool Fusion) → **GNN** (SAGE / R-GCN / GAT) → **evaluation / attribution wiring** →
+  **SDK replay adapter** (`executor/claude_exec.py`, demonstration only, off the critical path —
+  ADR 0015) → **gate** (deferred).
 - **Deferred — `gate.py` (T1.4):** consumes `confidence` / `homophily_local` (router) and is tuned
-  against `completion_rate` (executor), so it is YAGNI until the router exists (the executor now does).
-- Still intentional stubs (`raise NotImplementedError`): `embedding/openai_embed.py`,
-  `executor/claude_exec.py`, `routers/*`, `eval/*`, `contract_layer/gate.py`.
+  against `completion_rate` (executor), so it is YAGNI until the full router set exists.
+- Still intentional stubs (`raise NotImplementedError`): `routers/gnn.py` and the remaining
+  `routers/baselines.py` baselines (vector / traversal, not yet written), `embedding/openai_embed.py`,
+  `executor/claude_exec.py`, `eval/*`, `contract_layer/gate.py`.
 
 ## Standing rule — verify before asserting (all sessions)
 
