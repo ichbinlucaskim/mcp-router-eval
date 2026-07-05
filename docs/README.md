@@ -161,3 +161,4 @@ Title / Status / Context / Decision / Consequences / Alternatives considered.
 | [0024](adr/0024-gnn-split-and-leakage.md) | GNN split = query-level (transductive graph shared); leakage prevented by train-only stats + tuning-only validation | Accepted |
 | [0025](adr/0025-gnn-architecture-hyperparameters.md) | GNN architecture: 2 layers fixed; hidden dim / GAT heads / dropout searched on validation | Accepted |
 | [0026](adr/0026-gnn-training-setup.md) | GNN training setup: InfoNCE over in-batch negatives; AdamW; warm-up not required at our scale | Accepted |
+| [0027](adr/0027-homophily-local-definition.md) | homophily_local = node-level feature homophily (mean cosine to PARAMETER_* dependency neighbors) | Accepted |
