@@ -176,3 +176,4 @@ Title / Status / Context / Decision / Consequences / Alternatives considered.
 | [0026](adr/0026-gnn-training-setup.md) | GNN training setup: InfoNCE over in-batch negatives; AdamW; warm-up not required at our scale | Accepted |
 | [0027](adr/0027-homophily-local-definition.md) | homophily_local = node-level feature homophily (mean cosine to PARAMETER_* dependency neighbors) | Accepted |
 | [0028](adr/0028-evaluation-metrics.md) | Evaluation metrics = standard retrieval + structural completion + north-star transfer loss, sliced by depth, deterministic attribution | Accepted |
+| [0029](adr/0029-validation-tuning-protocol.md) | Validation tuning = deterministic grid search over the small discrete space; best by validation completion_rate (mAP@10 tiebreaker); multi-seed | Accepted |
