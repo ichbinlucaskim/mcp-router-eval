@@ -13,8 +13,23 @@ from __future__ import annotations
 import itertools
 import json
 import statistics
+import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+
+
+def _default_log(msg: str) -> None:
+    """Live progress line to stdout (flushed so it appears immediately, not buffered)."""
+    print(msg, flush=True)
+
+
+def _fmt_dur(seconds: float) -> str:
+    """``2m14s`` / ``1h03m20s`` style elapsed/ETA formatting."""
+    s = int(seconds)
+    h, rem = divmod(s, 3600)
+    m, sec = divmod(rem, 60)
+    return f"{h}h{m:02d}m{sec:02d}s" if h else f"{m}m{sec:02d}s"
 
 from mcp_router_eval.data.graph_build import build_graph
 from mcp_router_eval.data.loader import Dataset, Query
@@ -104,13 +119,17 @@ def run_grid(
     k: int = 10,
     out_dir: Path = EVAL_DIR,
     graph=None,
+    on_progress: Callable[[str], None] | None = None,
 ) -> tuple[dict[str, GridRecord], list[GridRecord]]:
     """Run the full grid per backbone; return ``(best_per_backbone, all_records)`` and write audit logs.
 
     Validation-only (ADR 0024): trains each config with best-validation checkpointing (early-stopping-
     equivalent — the best-val-loss epoch is kept within a bounded budget), scores on the **validation**
     split, and selects by ``completion_rate``/``mAP@k``. The **test split is never touched here.**
+    ``on_progress`` receives live per-config progress lines (default: flushed stdout); logging only —
+    it does not affect the grid, selection, training, splits, or artifacts.
     """
+    log = on_progress or _default_log
     graph = graph if graph is not None else build_graph(dataset)
     split = split_queries(len(dataset.queries), seed=seed)
     val_queries = [dataset.queries[i] for i in split.val]
@@ -118,21 +137,36 @@ def run_grid(
     ckpt_dir = out_dir / "grid_ckpts"
     ckpt_dir.mkdir(parents=True, exist_ok=True)
 
+    total = sum(grid_size(b) for b in backbones)
+    t0 = time.perf_counter()
+    done = 0
     all_records: list[GridRecord] = []
     best: dict[str, GridRecord] = {}
     for backbone in backbones:
         records: list[GridRecord] = []
         for i, cfg in enumerate(iter_configs(backbone, epochs=epochs, seed=seed)):
+            done += 1
+            desc = (f"backbone={backbone} hidden={cfg.hidden} dropout={cfg.dropout} heads={cfg.heads} "
+                    f"tau={cfg.tau} lr={cfg.lr} wd={cfg.weight_decay}")
+            log(f"[grid] {done}/{total} START  {desc}")
             trainer = GNNTrainer(dataset, graph, embedder, cfg)
             ckpt = ckpt_dir / f"{backbone}_{i}.pt"
             trainer.train(save_best=True, checkpoint_path=ckpt)  # keep best-validation model
             router = GNNRouter.from_checkpoint(ckpt, dataset, graph, embedder)
             comp, mp = score_on_validation(router, val_queries, dataset, k)
             records.append(GridRecord(backbone=backbone, config=vars(cfg), val_completion=comp, val_map=mp))
+            elapsed = time.perf_counter() - t0
+            eta = elapsed / done * (total - done)
+            log(f"[grid] {done}/{total} done   {desc}  val_completion={comp:.3f} val_map{k}={mp:.3f}  "
+                f"(elapsed {_fmt_dur(elapsed)}, eta {_fmt_dur(eta)})")
         all_records.extend(records)
         chosen = select_best(records)
         if chosen is not None:
             best[backbone] = chosen
+            c = chosen.config
+            log(f"[grid] backbone={backbone} BEST: hidden={c['hidden']} dropout={c['dropout']} "
+                f"heads={c['heads']} tau={c['tau']} lr={c['lr']} wd={c['weight_decay']}  "
+                f"val_completion={chosen.val_completion:.3f} val_map{k}={chosen.val_map:.3f}")
 
     # audit log of every config's validation score + the chosen best per backbone
     (out_dir / "grid_log.jsonl").write_text(
@@ -140,6 +174,7 @@ def run_grid(
                               "val_map": r.val_map, "config": r.config}) for r in all_records)
     )
     save_best_configs(best, out_dir / "best_configs.json")
+    log(f"[grid] wrote {out_dir / 'best_configs.json'} and {out_dir / 'grid_log.jsonl'}")
     return best, all_records
 
 
@@ -164,16 +199,27 @@ def load_best_configs(path: Path) -> dict[str, GNNTrainConfig]:
 # Multi-seed full evaluation (ADR 0028/0029)
 # --------------------------------------------------------------------------- #
 def train_seeds(
-    dataset: Dataset, graph, embedder: Embedder, config: GNNTrainConfig, seeds: list[int], ckpt_dir: Path
+    dataset: Dataset, graph, embedder: Embedder, config: GNNTrainConfig, seeds: list[int], ckpt_dir: Path,
+    *, on_progress: Callable[[str], None] | None = None,
 ) -> list[Path]:
-    """Train ``config`` once per seed; return the checkpoint paths (mean ± variance material, ADR 0029)."""
+    """Train ``config`` once per seed; return the checkpoint paths (mean ± variance material, ADR 0029).
+
+    ``on_progress`` logs per-seed training start/finish (with the best validation InfoNCE loss +
+    elapsed); logging only — identical training/checkpoints.
+    """
+    log = on_progress or _default_log
     ckpt_dir.mkdir(parents=True, exist_ok=True)
     paths = []
     for s in seeds:
         cfg = GNNTrainConfig(**{**vars(config), "seed": s})
         trainer = GNNTrainer(dataset, graph, embedder, cfg)
         ckpt = ckpt_dir / f"{cfg.backbone}_seed{s}.pt"
-        trainer.train(save_best=True, checkpoint_path=ckpt)
+        log(f"[full-eval] gnn_{cfg.backbone} seed {s}: training…")
+        t0 = time.perf_counter()
+        history = trainer.train(save_best=True, checkpoint_path=ckpt)
+        best_val = min(history["val"]) if history["val"] else float("nan")
+        log(f"[full-eval] gnn_{cfg.backbone} seed {s}: trained (best val_loss={best_val:.4f}, "
+            f"elapsed {_fmt_dur(time.perf_counter() - t0)})")
         paths.append(ckpt)
     return paths
 
@@ -201,8 +247,14 @@ def run_full_eval(
     graph=None,
     limit: int | None = None,
     save: bool = True,
+    on_progress: Callable[[str], None] | None = None,
 ) -> dict:
-    """Full TEST-split evaluation: baselines once, each GNN backbone over ``seeds`` → mean ± std (ADR 0028/0029)."""
+    """Full TEST-split evaluation: baselines once, each GNN backbone over ``seeds`` → mean ± std (ADR 0028/0029).
+
+    ``on_progress`` logs per-baseline and per-seed progress (default: flushed stdout); logging only —
+    identical routers, splits, metrics, and artifacts.
+    """
+    log = on_progress or _default_log
     graph = graph if graph is not None else build_graph(dataset)
     cfg = EvalConfig(k=k, seed=(seeds[0] if seeds else 0), limit=limit)
     split = split_queries(len(dataset.queries), seed=cfg.seed)
@@ -212,19 +264,26 @@ def run_full_eval(
 
     # baselines (no training) — one deterministic run each
     baselines = build_routers(dataset, graph, embedder, gnn_checkpoint=None)
-    baseline_reports = {
-        name: _router_report(_results_for(r, test_queries, dataset), cfg)
-        for name, r in baselines.items()
-    }
+    log(f"[full-eval] routers=baselines{list(baselines)}+gnn{list(best_configs)}  "
+        f"seeds={seeds}  test_split={len(test_queries)} queries")
+    baseline_reports = {}
+    for name, r in baselines.items():
+        log(f"[full-eval] eval {name} on test…")
+        baseline_reports[name] = _router_report(_results_for(r, test_queries, dataset), cfg)
+        log(f"[full-eval] eval {name}: done "
+            f"(overall completion={baseline_reports[name]['overall']['completion']['rate']:.3f})")
 
     # GNN backbones — mean ± std across seeds
     gnn_summary: dict[str, dict] = {}
     ckpt_dir = out_dir / "eval_ckpts"
     for backbone, config in best_configs.items():
         per_seed = []
-        for ckpt in train_seeds(dataset, graph, embedder, config, seeds, ckpt_dir):
+        for s, ckpt in zip(seeds, train_seeds(dataset, graph, embedder, config, seeds, ckpt_dir, on_progress=log)):
+            log(f"[full-eval] gnn_{backbone} seed {s}: eval on test…")
             router = GNNRouter.from_checkpoint(ckpt, dataset, graph, embedder)
             per_seed.append(_router_report(_results_for(router, test_queries, dataset), cfg))
+            log(f"[full-eval] gnn_{backbone} seed {s}: eval done "
+                f"(overall completion={per_seed[-1]['overall']['completion']['rate']:.3f})")
         gnn_summary[f"gnn_{backbone}"] = {
             "seeds": seeds,
             "overall_completion": _mean_std([r["overall"]["completion"]["rate"] for r in per_seed]),
@@ -248,6 +307,14 @@ def run_full_eval(
         out_dir.mkdir(parents=True, exist_ok=True)
         (out_dir / "full_eval.json").write_text(json.dumps(comparison, indent=2, default=str))
         (out_dir / "full_eval.txt").write_text(render_full_table(comparison))
+        log(f"[full-eval] wrote {out_dir / 'full_eval.json'} and {out_dir / 'full_eval.txt'}")
+    log("[full-eval] headline (deep-slice transfer_loss):")
+    for name, val in comparison["headline_deep_transfer_loss"].items():
+        if isinstance(val, dict):  # GNN mean±std
+            m, sd = val.get("mean"), val.get("std")
+            log(f"[full-eval]   {name:16s} {'n/a' if m is None else f'{m:.3f}±{sd:.3f}'}")
+        else:
+            log(f"[full-eval]   {name:16s} {'n/a' if val is None else f'{val:.3f}'}")
     return comparison
 
 

@@ -27,7 +27,17 @@ from pathlib import Path
 from mcp_router_eval.data.loader import load
 from mcp_router_eval.embedding.local import LocalEmbedder
 from mcp_router_eval.eval.harness import EVAL_DIR
-from mcp_router_eval.eval.tuning import BACKBONES, grid_size, run_grid
+from mcp_router_eval.eval.tuning import (
+    BACKBONES,
+    DROPOUTS,
+    GAT_HEADS,
+    HIDDENS,
+    LRS,
+    TAUS,
+    WEIGHT_DECAYS,
+    grid_size,
+    run_grid,
+)
 
 
 def main() -> None:
@@ -44,19 +54,16 @@ def main() -> None:
     backbones = BACKBONES if args.backbone == "all" else (args.backbone,)
     total = sum(grid_size(b) for b in backbones)
     print(f"[grid] backbones={backbones} configs={total} (per-backbone: "
-          f"{ {b: grid_size(b) for b in backbones} }) epochs={args.epochs} seed={args.seed}")
+          f"{ {b: grid_size(b) for b in backbones} }) epochs={args.epochs} seed={args.seed}", flush=True)
+    print(f"[grid] space: hidden={HIDDENS} dropout={DROPOUTS} heads(GAT)={GAT_HEADS} "
+          f"tau={TAUS} lr={LRS} weight_decay={WEIGHT_DECAYS}", flush=True)
 
     dataset = load(args.data) if args.data else load()
     embedder = LocalEmbedder(cache_dir=args.cache) if args.cache else LocalEmbedder()
 
-    best, _ = run_grid(dataset, embedder, backbones=backbones, epochs=args.epochs,
-                       seed=args.seed, k=args.k, out_dir=args.out)
-    print(f"[grid] wrote {args.out/'best_configs.json'} and {args.out/'grid_log.jsonl'}")
-    for bb, rec in best.items():
-        print(f"[grid] best {bb}: val_completion={rec.val_completion:.3f} val_map@{args.k}={rec.val_map:.3f} "
-              f"hidden={rec.config['hidden']} dropout={rec.config['dropout']} "
-              f"heads={rec.config['heads']} tau={rec.config['tau']} lr={rec.config['lr']} "
-              f"wd={rec.config['weight_decay']}")
+    # run_grid emits live per-config progress (counter, elapsed, ETA), per-backbone best, and paths.
+    run_grid(dataset, embedder, backbones=backbones, epochs=args.epochs,
+             seed=args.seed, k=args.k, out_dir=args.out)
 
 
 if __name__ == "__main__":

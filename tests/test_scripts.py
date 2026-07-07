@@ -78,3 +78,38 @@ def test_best_config_save_load_roundtrip(tmp_path):
     assert isinstance(got, GNNTrainConfig)
     assert (got.backbone, got.hidden, got.dropout, got.heads, got.tau, got.lr, got.weight_decay) == \
            ("gat", 128, 0.3, 4, 0.05, 5e-4, 1e-3)
+
+
+# --------------------------------------------------------------------------- #
+# Progress logging — counter lines emitted (tiny stubbed space; NO real training)
+# --------------------------------------------------------------------------- #
+def test_run_grid_emits_progress_counter(monkeypatch, tmp_path):
+    from mcp_router_eval.eval import tuning
+
+    # Stub the space to 2 configs and stub the heavy work (train/load/score) — logging only.
+    cfgs = [GNNTrainConfig(backbone="rgcn", hidden=32, epochs=1, seed=0),
+            GNNTrainConfig(backbone="rgcn", hidden=64, epochs=1, seed=0)]
+    monkeypatch.setattr(tuning, "iter_configs", lambda *a, **k: cfgs)
+    monkeypatch.setattr(tuning, "grid_size", lambda b: 2)          # test-local only; real grid unchanged
+
+    class _FakeTrainer:
+        def __init__(self, *a, **k): pass
+        def train(self, *, save_best=False, checkpoint_path=None):
+            Path(checkpoint_path).write_text("stub")
+            return {"train": [1.0], "val": [1.0]}
+
+    monkeypatch.setattr(tuning, "GNNTrainer", _FakeTrainer)
+    monkeypatch.setattr(tuning.GNNRouter, "from_checkpoint", classmethod(lambda cls, *a, **k: object()))
+    monkeypatch.setattr(tuning, "score_on_validation", lambda *a, **k: (0.30, 0.40))
+
+    ds = type("DS", (), {"queries": [object() for _ in range(10)]})()
+    logs: list[str] = []
+    best, records = tuning.run_grid(
+        ds, object(), backbones=("rgcn",), epochs=1, seed=0, out_dir=tmp_path,
+        graph=object(), on_progress=logs.append,
+    )
+    text = "\n".join(logs)
+    assert "1/2" in text and "2/2" in text                        # running counter over the 2 configs
+    assert "START" in text and "done" in text                    # per-config start + finish lines
+    assert "BEST" in text                                         # per-backbone selection line
+    assert len(records) == 2 and best["rgcn"].val_map == 0.40     # logic unchanged by logging
