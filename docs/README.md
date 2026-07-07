@@ -151,7 +151,7 @@ Title / Status / Context / Decision / Consequences / Alternatives considered.
 | [0001](adr/0001-toollinkos-sole-primary-benchmark.md) | ToolLinkOS is the sole primary benchmark; ToolSandbox demoted to stretch | Accepted |
 | [0002](adr/0002-executor-claude-agent-sdk.md) | Executor = Claude Code via claude-agent-sdk with mock tools as MCP tools | Accepted |
 | [0003](adr/0003-embedding-provider-interface.md) | Embedding behind a provider interface; LocalEmbedder(BGE) default, ada-002 optional | Accepted |
-| [0004](adr/0004-completion-structural-proxy.md) | Completion is a structural proxy, not semantic success | Accepted (amended 2026-07-05) |
+| [0004](adr/0004-completion-structural-proxy.md) | Completion is a structural proxy, not semantic success | Accepted (amended 2026-07-05; amendment's required-set A/B point superseded by [0030](adr/0030-completion-required-set.md)) |
 | [0005](adr/0005-closure-depth-slices.md) | Query slice = closure-depth buckets (shallow 2-3 / deep >=6) | Accepted |
 | [0006](adr/0006-four-edge-types.md) | 4 real dependency edge types; "core" is a node feature | Accepted |
 | [0007](adr/0007-pyg-over-dgl.md) | GNN framework = PyTorch Geometric (not DGL) | Accepted |
@@ -177,3 +177,4 @@ Title / Status / Context / Decision / Consequences / Alternatives considered.
 | [0027](adr/0027-homophily-local-definition.md) | homophily_local = node-level feature homophily (mean cosine to PARAMETER_* dependency neighbors) | Accepted |
 | [0028](adr/0028-evaluation-metrics.md) | Evaluation metrics = standard retrieval + structural completion + north-star transfer loss, sliced by depth, deterministic attribution | Accepted |
 | [0029](adr/0029-validation-tuning-protocol.md) | Validation tuning = deterministic grid search over the small discrete space; best by validation completion_rate (mAP@10 tiebreaker); multi-seed | Accepted |
+| [0030](adr/0030-completion-required-set.md) | Completion required-set = required-argument PARAMETER_* closure (variant A), decoupled from the execution/ordering closure; supersedes the ADR-0004 amendment's A/B ambiguity | Accepted |
