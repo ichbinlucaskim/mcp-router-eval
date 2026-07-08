@@ -48,6 +48,13 @@ GAT_HEADS = (2, 4)               # ADR 0025 (GAT only)
 TAUS = (0.05, 0.1, 0.2)          # ADR 0026 InfoNCE temperature
 LRS = (1e-3, 5e-4)               # ADR 0026 (around 1e-3)
 WEIGHT_DECAYS = (1e-4, 1e-3, 1e-2)  # ADR 0026 (1e-4..1e-2)
+# logQ popularity-correction strength (ADR 0031 amendment) — a real grid axis so the re-tune actually
+# explores debiasing. α=1.0 = the standard full −log Q correction (verified: "Correcting the LogQ
+# Correction", arXiv:2507.09331); α=0.0 disables it (recovers today's collapsed model); α=0.5 is a
+# partial correction included because our re-tune PROBE showed α=1 at a small budget *lowered* val_map
+# (0.369→0.272) — full correction can over-correct at our non-web scale — so strength is validation-tuned
+# (ADR 0029). Grounds: our own probe + ADR-0029 grid tuning (no unverified paper cited).
+ALPHAS = (0.0, 0.5, 1.0)
 
 BACKBONES = ("rgcn", "gat", "sage")
 
@@ -64,15 +71,15 @@ def training_grid() -> list[tuple[float, float, float]]:
 
 
 def iter_configs(backbone: str, *, epochs: int, seed: int, proj_dim: int = 128) -> list[GNNTrainConfig]:
-    """Enumerate the full grid for one backbone (ADR 0029): architecture × (τ, lr, weight_decay)."""
+    """Enumerate the full grid for one backbone (ADR 0029/0031): architecture × (τ, lr, wd) × α."""
     head_choices = GAT_HEADS if backbone == "gat" else (2,)  # heads only matter for GAT
     configs: list[GNNTrainConfig] = []
-    for hidden, dropout, heads, (tau, lr, wd) in itertools.product(
-        HIDDENS, DROPOUTS, head_choices, training_grid()
+    for hidden, dropout, heads, (tau, lr, wd), alpha in itertools.product(
+        HIDDENS, DROPOUTS, head_choices, training_grid(), ALPHAS
     ):
         configs.append(GNNTrainConfig(
             backbone=backbone, hidden=hidden, dropout=dropout, heads=heads, proj_dim=proj_dim,
-            tau=tau, lr=lr, weight_decay=wd, epochs=epochs, seed=seed,
+            tau=tau, lr=lr, weight_decay=wd, alpha=alpha, epochs=epochs, seed=seed,
         ))
     return configs
 
@@ -80,7 +87,7 @@ def iter_configs(backbone: str, *, epochs: int, seed: int, proj_dim: int = 128) 
 def grid_size(backbone: str) -> int:
     """Number of configs enumerated for ``backbone`` (for auditing / tests)."""
     arch = len(HIDDENS) * len(DROPOUTS) * (len(GAT_HEADS) if backbone == "gat" else 1)
-    return arch * len(training_grid())
+    return arch * len(training_grid()) * len(ALPHAS)
 
 
 # --------------------------------------------------------------------------- #
@@ -147,7 +154,7 @@ def run_grid(
         for i, cfg in enumerate(iter_configs(backbone, epochs=epochs, seed=seed)):
             done += 1
             desc = (f"backbone={backbone} hidden={cfg.hidden} dropout={cfg.dropout} heads={cfg.heads} "
-                    f"tau={cfg.tau} lr={cfg.lr} wd={cfg.weight_decay}")
+                    f"tau={cfg.tau} lr={cfg.lr} wd={cfg.weight_decay} alpha={cfg.alpha}")
             log(f"[grid] {done}/{total} START  {desc}")
             trainer = GNNTrainer(dataset, graph, embedder, cfg)
             ckpt = ckpt_dir / f"{backbone}_{i}.pt"
@@ -165,7 +172,7 @@ def run_grid(
             best[backbone] = chosen
             c = chosen.config
             log(f"[grid] backbone={backbone} BEST: hidden={c['hidden']} dropout={c['dropout']} "
-                f"heads={c['heads']} tau={c['tau']} lr={c['lr']} wd={c['weight_decay']}  "
+                f"heads={c['heads']} tau={c['tau']} lr={c['lr']} wd={c['weight_decay']} alpha={c['alpha']}  "
                 f"val_completion={chosen.val_completion:.3f} val_map{k}={chosen.val_map:.3f}")
 
     # audit log of every config's validation score + the chosen best per backbone

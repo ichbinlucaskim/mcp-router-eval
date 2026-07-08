@@ -2,9 +2,10 @@
 """Grid-search tuning over the ADR 0025/0026 discrete space (ADR 0029). RUN THIS YOURSELF.
 
 Per backbone (R-GCN / GAT / SAGE) it trains every config in the discrete grid — hidden {32,64,128},
-GAT heads {2,4}, dropout {0.0,0.3,0.5}, τ {0.05,0.1,0.2}, lr {1e-3,5e-4}, weight_decay {1e-4,1e-3,1e-2}
-— with best-validation checkpointing, and selects the best config by **validation completion_rate**
-(mAP@10 tiebreaker), on the validation split only (test untouched, ADR 0024).
+GAT heads {2,4}, dropout {0.0,0.3,0.5}, τ {0.05,0.1,0.2}, lr {1e-3,5e-4}, weight_decay {1e-4,1e-3,1e-2},
+and logQ correction strength α {0.0,0.5,1.0} (ADR 0031 amendment) — with best-validation checkpointing,
+and selects the best config by **validation completion_rate** (mAP@10 tiebreaker), on the validation
+split only (test untouched, ADR 0024).
 
 Prerequisites: ``data/processed/`` present (run ``scripts/fetch_data.py`` + preprocess) and the BGE
 embedding cache reachable (huggingface.co on first use); torch / torch-geometric already installed.
@@ -28,6 +29,7 @@ from mcp_router_eval.data.loader import load
 from mcp_router_eval.embedding.local import LocalEmbedder
 from mcp_router_eval.eval.harness import EVAL_DIR
 from mcp_router_eval.eval.tuning import (
+    ALPHAS,
     BACKBONES,
     DROPOUTS,
     GAT_HEADS,
@@ -56,7 +58,7 @@ def main() -> None:
     print(f"[grid] backbones={backbones} configs={total} (per-backbone: "
           f"{ {b: grid_size(b) for b in backbones} }) epochs={args.epochs} seed={args.seed}", flush=True)
     print(f"[grid] space: hidden={HIDDENS} dropout={DROPOUTS} heads(GAT)={GAT_HEADS} "
-          f"tau={TAUS} lr={LRS} weight_decay={WEIGHT_DECAYS}", flush=True)
+          f"tau={TAUS} lr={LRS} weight_decay={WEIGHT_DECAYS} alpha={ALPHAS}", flush=True)
 
     dataset = load(args.data) if args.data else load()
     embedder = LocalEmbedder(cache_dir=args.cache) if args.cache else LocalEmbedder()

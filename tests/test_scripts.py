@@ -5,6 +5,7 @@ import importlib.util
 from pathlib import Path
 
 from mcp_router_eval.eval.tuning import (
+    ALPHAS,
     GridRecord,
     grid_size,
     iter_configs,
@@ -38,16 +39,37 @@ def test_scripts_import_and_have_main():
 # Grid enumeration — exact config counts (ADR 0025/0026/0029)
 # --------------------------------------------------------------------------- #
 def test_grid_size_exact():
+    # ADR-0031 amendment: the grid now includes the α (logQ strength) axis → every count ×|ALPHAS|.
     t = len(training_grid())                         # |τ × lr × weight_decay|
-    assert grid_size("rgcn") == 3 * 3 * t            # hidden(3) × dropout(3) × training-set
-    assert grid_size("sage") == 3 * 3 * t
-    assert grid_size("gat") == 3 * 2 * 3 * t         # × heads(2)
+    a = len(ALPHAS)                                  # |α| (0.0, 0.5, 1.0)
+    assert grid_size("rgcn") == 3 * 3 * t * a        # hidden(3) × dropout(3) × training-set × α
+    assert grid_size("sage") == 3 * 3 * t * a
+    assert grid_size("gat") == 3 * 2 * 3 * t * a     # × heads(2)
+    # concrete totals: 162→486, 324→972, 162→486; grand total 648→1944
+    assert (grid_size("rgcn"), grid_size("gat"), grid_size("sage")) == (486, 972, 486)
+    assert sum(grid_size(b) for b in ("rgcn", "gat", "sage")) == 1944
     # the enumerator produces exactly that many, all with the right backbone
     cfgs = iter_configs("gat", epochs=1, seed=0)
     assert len(cfgs) == grid_size("gat")
     assert all(c.backbone == "gat" and c.epochs == 1 and c.seed == 0 for c in cfgs)
     # non-GAT never varies heads (heads fixed at 2)
     assert {c.heads for c in iter_configs("rgcn", epochs=1, seed=0)} == {2}
+
+
+def test_alpha_is_a_real_grid_axis():
+    # ADR-0031 amendment: α is now VARIED by the grid (was constant 0.0 — the invalid-re-tune bug).
+    cfgs = iter_configs("rgcn", epochs=1, seed=0)
+    assert {c.alpha for c in cfgs} == {0.0, 0.5, 1.0}            # α actually explored, not just {0.0}
+    assert ALPHAS == (0.0, 0.5, 1.0)
+    # each α value appears the same number of times (a full crossed axis, not a lopsided add-on)
+    from collections import Counter
+    counts = Counter(c.alpha for c in cfgs)
+    assert counts[0.0] == counts[0.5] == counts[1.0] == len(cfgs) // 3
+    # α=1.0 configs exist and are the debiasing twins of α=0.0 configs (same arch/optim, differ only in α)
+    a0 = next(c for c in cfgs if c.alpha == 0.0)
+    a1 = next(c for c in cfgs if c.alpha == 1.0 and (c.hidden, c.dropout, c.tau, c.lr, c.weight_decay)
+              == (a0.hidden, a0.dropout, a0.tau, a0.lr, a0.weight_decay))
+    assert a1.alpha == 1.0 and a0.alpha == 0.0                  # a matched α=0 / α=1 pair exists
 
 
 # --------------------------------------------------------------------------- #
@@ -112,4 +134,5 @@ def test_run_grid_emits_progress_counter(monkeypatch, tmp_path):
     assert "1/2" in text and "2/2" in text                        # running counter over the 2 configs
     assert "START" in text and "done" in text                    # per-config start + finish lines
     assert "BEST" in text                                         # per-backbone selection line
+    assert "alpha=" in text                                       # ADR-0031: α shown in the progress line
     assert len(records) == 2 and best["rgcn"].val_map == 0.40     # logic unchanged by logging
