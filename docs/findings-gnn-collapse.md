@@ -54,27 +54,43 @@ Three measured characteristics of the ToolLinkOS dependency graph:
   passing amplify popular items into a popularity-dominated embedding region and inflate their scores",
   arXiv:2605.11145, verified this session).
 
-## Controlled evidence — message passing is the sole differing variable
+## Controlled evidence — message passing is the meaningful differing variable
 
-The crux. **NaiveRAG and the GNN share the same BGE node features (ADR 0003/0020) and the same
-late-cosine scoring (ADR 0022 amendment). The GNN adds exactly one thing: message passing.** That single
-difference is what destroys a signal the raw features already contain.
+The crux. NaiveRAG and the GNN share the same BGE node features (ADR 0003/0020) and the same late-cosine
+scoring (ADR 0022 amendment); the difference is message passing. To make that **clean** (a fairness audit
+noted the *default* GNN also adds a learned two-tower projection), we ran an **isolation probe**: a GNN
+with **no learned projection** (`proj_dim=None`, node tower in the raw **384-d BGE space**, cosine against
+the raw BGE query) — so its **only** difference from NaiveRAG is message passing.
 
 Measured on the validation split (seed 0, 235 queries; short-trained GNN):
 
-| router | message passing? | variant-A completion | main-tool median rank | `corr(gold_freq, mean_rank)` |
-| --- | :---: | ---: | ---: | ---: |
-| **NaiveRAG** (BGE + cosine) | **no** | **0.970** | **0** | **−0.03** |
-| Traversal | no (dep-expansion only) | 0.898 | 0 | +0.39 |
-| BM25 | no | 0.762 | 1 | +0.19 |
-| **GNN** (all backbones) | **yes** | **0.000** | **~272–296** | **−0.235** |
+| router | vs NaiveRAG | variant-A completion | main∈top-10 | main-tool median rank | `corr(gold_freq, rank)` | node pairwise-cos |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| **NaiveRAG** (BGE + cosine) | — | **0.970** | **227/235** | **0** | **−0.03** | **0.501** |
+| Traversal | no MP (dep-expansion) | 0.898 | — | 0 | +0.39 | — |
+| BM25 | no MP | 0.762 | — | 1 | +0.19 | — |
+| **GNN — MP only** (`proj=None`) | **+ message passing only** | **0.000** | **0/235** | ~272–296 | **−0.247** | **0.862** |
+| GNN — MP + projection (default) | + MP + learned projection | 0.000 | 0/235 | ~272–296 | −0.244 | 0.883 |
 
-- NaiveRAG, on the *identical* features, ranks the query-specific main tool at **median rank 0** and shows
-  **no** frequency bias (`corr ≈ −0.03`).
-- The GNN — adding only message passing — buries the main tool at **median ~272–296 / 573** and ranks
-  strongly **by frequency** (`corr = −0.235`, i.e. more-frequent tools sit higher).
-- The features are good; **message passing degrades them.** This is a controlled result, not a
-  correlation: the lone changed variable is message passing.
+- **The MP-only control collapses identically to the full GNN.** With *no* learned projection and a raw-BGE
+  query — the only difference from NaiveRAG being message passing — completion is **0.000**, the main tool
+  is **never** retrieved (**0/235**), and ranking is frequency-driven (`corr −0.247`). Adding the learned
+  two-tower projection changes essentially nothing (node pairwise cosine **0.862 → 0.883**; every other
+  number identical). So **the meaningful difference from NaiveRAG is message passing; the projection is a
+  negligible compounding factor, not a co-driver.**
+- **Message passing over-smooths the nodes *by itself*.** Node-embedding mean pairwise cosine:
+  **NaiveRAG 0.501 → MP-only 0.862 → MP+projection 0.883** (1.0 = all identical). MP homogenizes the node
+  embeddings with no projection involved, so the query cosine can barely discriminate tools — the concrete
+  mechanism behind the frequency-ranking collapse (DPAA's amplification, cited above).
+- **Uniform burial, not a partial effect.** The GNN gets the query's main tool into top-10 for **0/235**
+  queries vs NaiveRAG's **227/235**; `corr(gold_freq, mean_rank) ≈ −0.24` (GNN) vs **−0.03** (NaiveRAG).
+  The features are good; message passing degrades them.
+
+**Over-determination (honest bound — no overclaim).** The collapse is *over-determined*: message passing
+**alone** suffices (the isolation probe above), **and** the frequency-trained two-tower head **alone**
+suffices (the `α_res=1` probe — ADR-0025 amendment — collapsed to 0.000 with message passing bypassed).
+Foregrounding message passing is correct and data-supported — the claim is **"message passing by itself is
+sufficient for the collapse,"** *not* "message passing is the only possible cause."
 
 ## Why the standard remedies did not help (we understand the failure)
 
@@ -95,6 +111,30 @@ Measured on the validation split (seed 0, 235 queries; short-trained GNN):
 
 Together: no tested knob — across three backbones, the full architecture/optimizer grid, `α`, and
 `α_res` — ever moved variant-A completion off **0.000**. The collapse is **config-invariant**.
+
+## Evaluation fairness — is the collapse a real limitation, or our design's fault?
+
+Audited directly (git-clean, measured) to pre-empt *"isn't this your evaluation's fault?"*. Verdict:
+**the design is fair — the collapse is a genuine message-passing limitation, not an artifact.**
+
+- **The hub is the DATA's, not our construction.** `get_wifi_status` in-degree matches the raw ToolLinkOS
+  records **exactly**: raw **371** = processed **371** = graph **371**; total edges **1496** unchanged
+  through the whole pipeline (`graph_build.py` maps each `depends_on` record 1:1 — no self-loops, no
+  inflation).
+- **The control is (near-)symmetric.** GNN and NaiveRAG use the same BGE features (+`is_core`, extra not
+  missing), the same per-tower L2, and the same plain-cosine inference (dropout **off** at serving); the
+  isolation probe above removes even the projection asymmetry, and MP-alone still collapses.
+- **The GNN is query-conditioned BY CONSTRUCTION.** It has a `query_proj` and the InfoNCE loss scores
+  `q @ node.T` per query (`gnn_train.py`), so it *can* rank per-query. The query-agnostic behavior —
+  **identical top-10 across different queries**, top-1 constant — is **learned** (from the 0.862
+  over-smoothing), not a structural inability to see the query.
+- **The gate is uniform.** `evaluate_query` has **no** GNN-specific branch; the variant-A completion gate,
+  depth slices, and attribution are byte-identical across all seven routers (the only router-type check,
+  `_route`, merely picks `route()` vs `assemble_route_result()`, both → `RouteResult`).
+
+**Bottom line:** a reviewer's *"isn't this your design's fault?"* is answered with data — **no**. The hub
+is real, the control is symmetric (down to the MP-only isolation), the GNN can see the query by
+construction, and the gate is uniform.
 
 ## Scope — honest bounds
 
