@@ -140,3 +140,62 @@ reported as such.
   distributions + repeated message passing amplify popular items into a popularity-dominated embedding
   region and inflate their scores; IPW-family reweighting is an established remedy:
   <https://arxiv.org/abs/2605.11145>
+
+## Amendment 2026-07-05 — logQ is a training-time logit correction, removed at inference
+
+This **corrects the form** of the Primary decision above (it does **not** overturn the choice to debias
+via logQ). The original wrote the correction as `score'(q,t) = cos(q,t) − α·log f(t)`, which reads as a
+term applied **everywhere** (training *and* inference) with a **free per-tool weight**. The standard,
+verified form is narrower: it is a **training-time importance-sampling correction on the logits, removed
+at inference.**
+
+### Corrected form
+
+- **Training only (in the InfoNCE / sampled-softmax logits).** Subtract the log in-batch sampling
+  probability from each candidate's logit, for **both the positive and the in-batch negatives**:
+
+  > **`logit(q, t) = cos(q, t) / τ − log Q(t)`**
+
+  where `Q(t)` is tool `t`'s **in-batch appearance probability ≈ its TRAIN-split gold frequency / total**
+  (ADR 0024 — train-only, **no leakage**). This offsets the popularity penalty that in-batch negatives
+  impose (frequent tools appear as negatives more often); `−log Q` is the **importance-sampling
+  correction** that removes that sampling bias — **not** a free `1/f` reweight.
+
+- **Inference (router `rank`) uses PLAIN cosine — no correction.** At serving there are **no in-batch
+  negatives** (all **573** tools are scored for the query), so **there is no sampling bias to correct**.
+  Applying `−log Q` at inference would **wrongly suppress popular tools**. This is the key fix relative to
+  the original phrasing: the correction lives in the **loss**, not in the served score.
+
+- **`α` is a correction-strength switch, not a per-tool weight.** `α = 1` is the standard `−log Q`;
+  `α = 0` disables it (recovers today's model); `α` is tuned in the ADR-0029 grid over a small discrete
+  set (e.g. `{0, 0.5, 1}`). So the training logit is `cos(q,t)/τ − α·log Q(t)`, applied to positive and
+  in-batch negatives alike, and dropped entirely at inference.
+
+### Decision — use the standard logQ
+
+Adopt the **standard `−log Q` training correction**. The *positive-deterministic corrected variant*
+(Khrylchenko et al., below — the standard form is slightly mis-derived because the positive is
+deterministic, not sampled) is recorded as a **future ablation, not primary**: at our 573-tool scale the
+standard form is sufficient and simpler.
+
+### Unchanged from the original ADR-0031
+
+Train-only frequency; the **ADR-0023 false-negative-filter interaction remains a hypothesis** to test in
+step 7 (and note: with in-batch negatives now the *explicit* locus of the correction, the filter's effect
+on the effective negative distribution `Q(t)` is exactly what step 7 must measure); **uniformity
+regularization stays an ablation**; the **evaluation link** (correlate with `homophily_local` / deep-slice
+`transfer_loss`) and the **"a documented negative result is acceptable"** stance both stand.
+
+### Sources (this amendment; verified this session)
+
+- Khrylchenko, Pashkov, et al. (Yandex), *"Correcting the LogQ Correction"* (RecSys'25, arXiv:2507.09331)
+  — **verified this session:** exactly our setting (**two-tower + in-batch negatives + sampled softmax**);
+  the **standard logQ subtracts `−log Q` from the training logits** to offset the popularity penalty from
+  in-batch negatives; it also shows the standard form is **slightly mis-derived** (the positive is
+  deterministic, not sampled) and gives a corrected variant: <https://arxiv.org/abs/2507.09331>
+- CLRec (arXiv:2005.12964) — the contrastive↔IPW equivalence, already cited above.
+
+**Honest gap (unchanged in spirit).** These are **recommendation / retrieval**, not tool routing. The
+**two-tower + in-batch-negatives + logQ** structure matches ours closely (closer than the original
+CF citations), but our **dependency false-negative filter (ADR 0023)** changes the **effective negative
+distribution `Q(t)`** — an interaction we design and verify ourselves, not one the papers cover.
