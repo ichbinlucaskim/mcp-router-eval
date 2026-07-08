@@ -16,11 +16,18 @@ Building the directed graph *u → v* ("u depends on v") over **all** `depends_o
 
 | Edge subset | edges | cyclic nodes | DAG? | gold sets w/ cycle |
 | --- | ---: | ---: | :---: | ---: |
-| ALL 4 types | 1494 | 485 | ❌ | 1374 |
-| `TOOL` (direct+indirect) | 850 | 426 | ❌ | 1374 |
-| **`TOOL_DIRECTLY` only** | 675 | 0 | ✅ | 0 |
-| **`PARAMETER` (direct+indirect)** | 644 | 0 | ✅ | 0 |
-| **`PARAMETER_DIRECTLY` only** | 405 | 0 | ✅ | 0 |
+| ALL 4 types | 1496 | 485 | ❌ | 1374 |
+| `TOOL` (direct+indirect) | 851 | 426 | ❌ | 1374 |
+| **`TOOL_DIRECTLY` only** | 676 | 0 | ✅ | 0 |
+| **`PARAMETER` (direct+indirect)** | 645 | 0 | ✅ | 0 |
+| **`PARAMETER_DIRECTLY` only** | 406 | 0 | ✅ | 0 |
+
+> **Edge counts above are PROCESSED-data values** (`data/processed/tools.jsonl`, verified this session:
+> `param_direct` 406, `param_indirect` 239, `PARAMETER` 645, `tool_direct` 676, `tool_indirect` 175,
+> `TOOL` 851, all-4 **1496** — consistent with the "1,496 dependency pairs" in Check 2 below). The
+> raw@`b630b98` figures this report was first written against are **1 lower per edge-type**
+> (`PARAMETER` 644, `TOOL` 850, `param_direct` 405, `tool_direct` 675; all-4 1494); the +1-each drift is
+> from malformed-row normalization during processing. Cycle / gold-set-cycle counts are unchanged.
 
 - **21 mutual 2-cycles** (`u ⇄ v`); **12 are `get_`/`set_` pairs**, e.g.
   `get_location_service_status ⇄ set_location_service_status`,

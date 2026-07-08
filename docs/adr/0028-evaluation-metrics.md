@@ -42,10 +42,16 @@ buckets** (ADR 0005: shallow 2–3 vs deep ≥6):
 ToolLinkOS paper. Ranking quality only.
 
 **2. Structural completion (rule-based, decomposable — MCP-Bench principle).**
-`completion_rate` per ADR 0004 = correct tool **set** + dependency **order** + **type-valid** args. Also
+`completion_rate` per ADR 0004 (required-set = the variant-A **required-argument `PARAMETER_*` closure**,
+[ADR 0030](0030-completion-required-set.md), *not* the full `golden_function_names`) = correct tool
+**set** + dependency **order** + **type-valid** args. Also
 report **component sub-rates** so completion is decomposable rather than a single opaque pass/fail —
 aligned to MCP-Bench's rule-based tool-usage evaluation:
-  - **name validity** — the invoked tools are the required set (no missing/spurious tool);
+  - **name validity** — the invoked tools cover the completion **required-set** (the variant-A
+    required-argument `PARAMETER_*` closure, ADR 0030). A gold tool attached only by `TOOL_*` edges — or
+    via an *optional* `PARAMETER_*` argument — is neither **required** (it is outside the variant-A
+    required-set) nor **spurious** (it may legitimately appear); name validity is judged solely against
+    the variant-A required-set, not the full `golden_function_names`;
   - **schema / type adherence** — call args are type-valid against the built JSON Schema (ADR 0014);
   - **dependency compliance** — `PARAMETER_*` order respected + no unsourced dependency arg (ADR 0012/0016);
   - **runtime success** — the mock runner reports every call `ok` (ADR 0015).

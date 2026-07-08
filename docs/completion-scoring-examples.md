@@ -29,12 +29,22 @@ Real edges (all `PARAMETER_DIRECTLY_DEPENDS_ON`, from the data):
 - `audible_account_login`  depends on  `validate_email`   (param `email`)
 - `download_audible_book`  depends on  `audible_account_login`  (param `session_id`)
 
-`validate_email` is a `core` tool with **no** dependencies. The remaining gold tools
-(`get_wifi_status`, `get_battery_status`, the `*_low_battery_*` / `*_wifi_*` get/set pairs,
-`get_system_language`) are attached by `TOOL_*` edges only; they carry **no required-arg dependency**
-and are **excluded from ordering** (the `TOOL_INDIRECTLY` get/set pairs are exactly what make the
-full-edge graph cyclic — see the feasibility report). Ordering uses the PARAMETER sub-graph, which is
-a DAG.
+`validate_email` is a `core` tool with **no** dependencies. The remaining gold tools are all correctly
+dropped from the completion required-set, but for **two different reasons** (do not conflate them):
+
+- `get_wifi_status`, `get_battery_status`, and the `*_low_battery_*` / `*_wifi_*` get/set pairs are
+  attached by `TOOL_*` edges only; they carry **no required-arg dependency** and are **excluded from
+  ordering** (the `TOOL_INDIRECTLY` get/set pairs are exactly what make the full-edge graph cyclic —
+  see the feasibility report).
+- `get_system_language` is **not** `TOOL_*`-only. It is a `PARAMETER_*` source (`param_indirect`) of
+  `audible_account_login`'s argument `language`, but that argument is **optional**
+  (`audible_account_login.required = [email, password]` — verified in `data/processed/tools.jsonl`). So
+  under the **required-argument rule (ADR-0030, variant A)** its source is excluded from the completion
+  **required-set** *because the sourced arg is optional* — **not** because the edge is `TOOL_*`. (If
+  `get_system_language` is selected, its `PARAMETER_*` order is still honored — ordering closure, ADR
+  0012/0013; it is simply not *required* to be present.)
+
+Ordering uses the PARAMETER sub-graph, which is a DAG.
 
 **Derived topo-sorted execution order (deps first, main last):**
 ```
@@ -50,7 +60,7 @@ dependencies (ADR 0012).
 ```yaml
 query_id: q240
 query_text: "... download 'The Great Gatsby' from Audible ..."
-gold_closure: [validate_email, audible_account_login, download_audible_book]   # param-source spine
+gold_closure: [validate_email, audible_account_login, download_audible_book]   # required-arg PARAMETER_* closure (ADR-0030 variant A); get_system_language excluded as an OPTIONAL-arg source, not as TOOL_*
 exec_order:   [validate_email, audible_account_login, download_audible_book]   # topo (deps first)
 
 router.selected_tools: [download_audible_book, audible_account_login, validate_email]
@@ -86,7 +96,7 @@ retrieves the two "obvious" tools but drops the low-homophily param-source.
 
 ```yaml
 query_id: q240-B
-gold_closure: [validate_email, audible_account_login, download_audible_book]
+gold_closure: [validate_email, audible_account_login, download_audible_book]   # required-arg PARAMETER_* closure (ADR-0030)
 exec_order:   [validate_email, audible_account_login, download_audible_book]
 
 router.selected_tools: [download_audible_book, audible_account_login]   # validate_email MISSED
@@ -126,7 +136,7 @@ its param-sources have run, so a required argument produced upstream is unavaila
 
 ```yaml
 query_id: q240-C
-gold_closure: [validate_email, audible_account_login, download_audible_book]
+gold_closure: [validate_email, audible_account_login, download_audible_book]   # required-arg PARAMETER_* closure (ADR-0030)
 exec_order:   [validate_email, audible_account_login, download_audible_book]   # expected
 
 router.selected_tools: [download_audible_book, audible_account_login, validate_email]

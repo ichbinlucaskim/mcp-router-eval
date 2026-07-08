@@ -65,6 +65,18 @@ with the ADR-0012 cycle finding, refine that intent to the `PARAMETER_*` spine:
   `router.selected_tools: [download_audible_book, audible_account_login, validate_email]` (`:56`) →
   `verdict.completed: true` (`:69`) — **not** the 9-name golden set.
 
+> **Correction (superseded by [ADR-0030](0030-completion-required-set.md)).** The inherited reason
+> *"`get_system_language` … attached by `TOOL_*` edges only"* (quoted above from
+> `completion-scoring-examples.md:32-37`) is **factually wrong**. Measured on `data/processed/tools.jsonl`
+> this session, `get_system_language` is a **`PARAMETER_*` source** (`param_indirect`) of
+> `audible_account_login`'s **optional** `language` argument
+> (`audible_account_login.required = [email, password]`; `get_system_language.deps = []`). The **3-tool
+> q240 spine is still correct**, but *because* the `language` arg is **optional** — so under the
+> required-argument rule (ADR-0030, variant A) its source is excluded from the completion required-set —
+> **not** because the edge is `TOOL_*`. The `get_wifi_status` / `*_wifi_*` / `*_low_battery_*` /
+> `get_battery_status` golds remain genuinely `TOOL_*`-only. This amendment's history is kept intact; only
+> the edge-type *reason* for excluding `get_system_language` is corrected.
+
 ADR-0013 and the scoring examples post-date ADR-0004 and explicitly reconcile with the cycle finding, so
 they refine ADR-0004's intent. This amendment makes ADR-0004 consistent with them: the earlier phrasing
 `golden_function_names` predates the `PARAMETER_*` / `TOOL_*` functional split (ADR 0013) and is superseded
@@ -76,7 +88,7 @@ The excluded `TOOL_*` golds are **query-irrelevant label associations with no ex
 Measured on our own data (the diagnosis over the 235 validation queries, seed 0): the mean gold set has
 **5.8 tools, of which ~3.2 lie *outside* the `PARAMETER_*` spine** (TOOL_*-attached), and the
 most-frequently-missed golds are `get_wifi_status` (missed in **184/235** queries) and `set_wifi_status`
-(**182/235**) — generic connectivity tools attached to nearly every task regardless of what it is.
+(**184/235**) — generic connectivity tools attached to nearly every task regardless of what it is.
 Requiring their recall measures **label noise, not structural task completion**, and matches the data's
 known dirtiness (the recorded dependency-semantic gap of mean lexical-Jaccard **0.08**,
 `docs/feasibility-completion.md`). Concretely, under our data BM25's completion is **0.098** against the
