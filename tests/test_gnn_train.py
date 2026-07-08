@@ -216,6 +216,15 @@ def test_determinism_with_alpha(ctx):
     assert h1["train"] == h2["train"] and h1["val"] == h2["val"]  # same seed+alpha → identical trajectory
 
 
+def test_alpha_res_plumbed_from_config_to_encoder():
+    # ADR-0025 amendment: build_scorer threads config.alpha_res into the encoder's initial residual.
+    from mcp_router_eval.routers.gnn_train import build_scorer
+    s = build_scorer(GNNTrainConfig(backbone="rgcn", alpha_res=0.7), in_dim=385, query_dim=384)
+    assert s.encoder.alpha_res == 0.7 and s.encoder.h0_proj is not None
+    s0 = build_scorer(GNNTrainConfig(backbone="sage", alpha_res=0.0), in_dim=385, query_dim=384)
+    assert s0.encoder.alpha_res == 0.0 and s0.encoder.h0_proj is None    # α_res=0 → no residual module
+
+
 # --------------------------------------------------------------------------- #
 # Loss descends — all three backbones train
 # --------------------------------------------------------------------------- #

@@ -66,8 +66,18 @@ def node_feature_matrix(graph: ToolGraph, dataset: Dataset, embedder: Embedder) 
 class GNNEncoder(nn.Module):
     """2-layer GNN encoder producing graph-refined node embeddings ``[N, out_dim]`` (ADR 0025).
 
-    Fixed structure (ADR 0025): exactly 2 message-passing layers, ReLU + feature dropout between them,
-    **no residual connections**. Subclasses only supply the two conv layers via :meth:`_build_convs`.
+    Fixed structure (ADR 0025): exactly 2 message-passing layers, ReLU + feature dropout between them.
+    Subclasses only supply the two conv layers via :meth:`_build_convs`.
+
+    **Optional GCNII-style initial residual (ADR-0025 amendment).** With ``alpha_res > 0`` each layer
+    mixes the raw input features back in: ``h ← (1 − α_res)·MP(h) + α_res·h0``, where ``h0`` is a single
+    shared projection of the raw node features to ``hidden`` (``project_initial_features``, the PyG/DGL
+    GCN2Conv standard), computed once and reused at every layer whose output is at ``hidden`` width. This
+    preserves the strong raw features against message-passing hub amplification (the measured collapse
+    driver). ``alpha_res = 0`` (default) creates **no** projection module and is byte-identical to the
+    pre-amendment encoder. GCNII (arXiv:2007.02133) uses a *small* α (≈0.1) to fight over-smoothing in
+    *deep* GCNs; we ALSO probe *large* α here because our features are strong (NaiveRAG 0.970) and MP is
+    harmful at 2 layers (root-cause diagnosis), so feature preservation, not depth, is the motivation.
     """
 
     #: R-GCN needs ``edge_type`` in its forward; GAT/SAGE do not — keeps the call signature uniform.
@@ -80,6 +90,7 @@ class GNNEncoder(nn.Module):
         *,
         out_dim: int | None = None,
         dropout: float = DEFAULT_DROPOUT,
+        alpha_res: float = 0.0,
         **backbone_kwargs,
     ) -> None:
         super().__init__()
@@ -87,8 +98,12 @@ class GNNEncoder(nn.Module):
         self.hidden = hidden
         self.out_dim = out_dim if out_dim is not None else hidden
         self.dropout = dropout
+        self.alpha_res = float(alpha_res)
         self.num_layers = 2  # fixed (ADR 0025)
         self.conv1, self.conv2 = self._build_convs(in_dim, hidden, self.out_dim, **backbone_kwargs)
+        # Shared input projection for the initial residual — built AFTER the convs (so their init/RNG is
+        # unchanged) and ONLY when enabled, so alpha_res=0 is exactly the pre-amendment model.
+        self.h0_proj = nn.Linear(in_dim, hidden) if self.alpha_res > 0.0 else None
 
     def _build_convs(self, in_dim: int, hidden: int, out_dim: int, **kw):
         raise NotImplementedError
@@ -96,11 +111,26 @@ class GNNEncoder(nn.Module):
     def _run_conv(self, conv, x, edge_index, edge_type):
         return conv(x, edge_index, edge_type) if self.uses_edge_type else conv(x, edge_index)
 
+    def _initial_residual(self, h: torch.Tensor, h0: torch.Tensor | None) -> torch.Tensor:
+        """GCNII initial residual ``(1 − α_res)·h + α_res·h0`` (ADR-0025 amendment).
+
+        Applied only where widths match ``h0`` (both layers for R-GCN/SAGE; the output layer for GAT,
+        whose layer-1 head-concat width differs). ``h0 is None`` (α_res=0) → a no-op, so the forward pass
+        is byte-identical to the pre-amendment encoder.
+        """
+        if h0 is None or h.shape[-1] != h0.shape[-1]:
+            return h
+        a = self.alpha_res
+        return (1.0 - a) * h + a * h0
+
     def forward(self, x, edge_index, edge_type=None):
+        h0 = self.h0_proj(x) if self.h0_proj is not None else None   # shared projection, computed once
         h = self._run_conv(self.conv1, x, edge_index, edge_type)
+        h = self._initial_residual(h, h0)                            # initial residual (ADR-0025 amend.)
         h = F.relu(h)
         h = F.dropout(h, p=self.dropout, training=self.training)
-        h = self._run_conv(self.conv2, h, edge_index, edge_type)  # no residual (ADR 0025)
+        h = self._run_conv(self.conv2, h, edge_index, edge_type)
+        h = self._initial_residual(h, h0)                            # initial residual (ADR-0025 amend.)
         return h
 
 
@@ -116,9 +146,11 @@ class RGCNEncoder(GNNEncoder):
         *,
         out_dim: int | None = None,
         dropout: float = DEFAULT_DROPOUT,
+        alpha_res: float = 0.0,
         num_relations: int = NUM_RELATIONS,
     ) -> None:
-        super().__init__(in_dim, hidden, out_dim=out_dim, dropout=dropout, num_relations=num_relations)
+        super().__init__(in_dim, hidden, out_dim=out_dim, dropout=dropout, alpha_res=alpha_res,
+                         num_relations=num_relations)
 
     def _build_convs(self, in_dim, hidden, out_dim, *, num_relations=NUM_RELATIONS):
         self.num_relations = num_relations
@@ -138,9 +170,10 @@ class GATEncoder(GNNEncoder):
         *,
         out_dim: int | None = None,
         dropout: float = DEFAULT_DROPOUT,
+        alpha_res: float = 0.0,
         heads: int = DEFAULT_HEADS,
     ) -> None:
-        super().__init__(in_dim, hidden, out_dim=out_dim, dropout=dropout, heads=heads)
+        super().__init__(in_dim, hidden, out_dim=out_dim, dropout=dropout, alpha_res=alpha_res, heads=heads)
 
     def _build_convs(self, in_dim, hidden, out_dim, *, heads=DEFAULT_HEADS):
         self.heads = heads

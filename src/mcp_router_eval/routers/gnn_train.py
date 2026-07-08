@@ -189,6 +189,8 @@ class GNNTrainConfig:
     hidden: int = DEFAULT_HIDDEN           # ADR 0025 search {32,64,128}
     dropout: float = DEFAULT_DROPOUT       # ADR 0025 search {0.0,0.3,0.5}
     heads: int = DEFAULT_HEADS             # GAT only (ADR 0025 search {2,4})
+    alpha_res: float = 0.0                 # GCNII initial-residual strength (ADR 0025 amendment;
+                                           # 0 = off/baseline; a future grid axis — probe first, ADR 0029)
     proj_dim: int | None = DEFAULT_PROJ_DIM
     tau: float = 0.1                       # InfoNCE temperature (ADR 0024/0025 validation-tuned)
     alpha: float = 0.0                     # logQ popularity-correction strength (ADR 0031 amendment;
@@ -210,7 +212,7 @@ def build_scorer(config: GNNTrainConfig, in_dim: int, query_dim: int) -> GNNScor
     saved config reconstructs the identical architecture before ``load_state_dict`` (ADR 0025/0022).
     """
     cls = _BACKBONES[config.backbone]
-    kw: dict = {"hidden": config.hidden, "dropout": config.dropout}
+    kw: dict = {"hidden": config.hidden, "dropout": config.dropout, "alpha_res": config.alpha_res}
     if config.backbone == "gat":
         kw["heads"] = config.heads
     encoder = cls(in_dim, **kw)
