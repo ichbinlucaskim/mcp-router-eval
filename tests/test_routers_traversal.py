@@ -23,6 +23,7 @@ from mcp_router_eval.contracts import (
 )
 from mcp_router_eval.data.loader import load, topo_order
 from mcp_router_eval.embedding.local import LocalEmbedder
+from mcp_router_eval.eval.harness import variant_a_required_set
 from mcp_router_eval.executor.mock_tools import run as mock_run
 from mcp_router_eval.routers.base import HOMOPHILY_NA, RankResult, Router
 from mcp_router_eval.routers.baselines import (
@@ -183,15 +184,21 @@ def _plan(ds, route, rep):
 
 @realdata
 def test_full_path_success_and_contract(ds, routers):
+    # De-circularized (ADR-0030, checkup step 5): score completion against the variant-A required-set
+    # (the required-arg PARAMETER_* spine the harness uses), not route.selected_tools (tautological) —
+    # verifying the traversal router actually recovered the required-arg tools for q240.
     q = ds.query_by_id("q240")
     route = assemble_route_result(routers["traversal"].rank(q.query_text, q.query_id), ds.tool_deps)
     rep = check_invariants(route, ds.tool_deps)
-    res = mock_run(_plan(ds, route, rep), ds.tool_deps, route.selected_tools)
-    att = attribute(route, res, rep, required_tools=route.selected_tools)
+    required = variant_a_required_set(q.main, ds.tool_deps)
+    assert required <= set(route.selected_tools)    # REAL check: router surfaced the required-arg spine
+    res = mock_run(_plan(ds, route, rep), ds.tool_deps, list(required))
+    att = attribute(route, res, rep, required_tools=list(required))
     assert res.completed is True and att.outcome is Outcome.SUCCESS and att.blame is Blame.NONE
 
     # Dependency-drop → CONTRACT through the real traversal router (Scenario B).
     assert "validate_email" in route.selected_tools
+    assert "validate_email" in required             # a REQUIRED-arg source → its drop is a real miss
     dropped = [t for t in route.selected_tools if t != "validate_email"]
     route_c = route.model_copy(update={"selected_tools": dropped})
     rep_c = check_invariants(route_c, ds.tool_deps)

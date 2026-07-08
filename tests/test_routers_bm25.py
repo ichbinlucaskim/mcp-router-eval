@@ -22,6 +22,7 @@ from mcp_router_eval.contracts import (
     RouteResult,
 )
 from mcp_router_eval.data.loader import load, topo_order
+from mcp_router_eval.eval.harness import variant_a_required_set
 from mcp_router_eval.executor.mock_tools import run as mock_run
 from mcp_router_eval.routers.base import HOMOPHILY_NA, RankResult, Router, normalize_confidence
 from mcp_router_eval.routers.baselines import BM25Router
@@ -173,12 +174,19 @@ def _plan(ds, route, rep):
 
 
 def test_full_path_success_through_bm25(ds, bm25):
+    # De-circularized (ADR-0030, checkup step 5): completion is scored against the **variant-A
+    # required-set** (the required-arg PARAMETER_* spine the harness uses), NOT route.selected_tools —
+    # which trivially contains its own closure and passes tautologically. This now verifies that BM25
+    # actually RECOVERED the required-arg tools (download_audible_book → audible_account_login →
+    # validate_email) for q240.
     q = ds.query_by_id("q240")
     route = assemble_route_result(bm25.rank(q.query_text, q.query_id), ds.tool_deps)
     rep = check_invariants(route, ds.tool_deps)
     assert rep.closure_complete is True             # the shared stage completes the closure
-    res = mock_run(_plan(ds, route, rep), ds.tool_deps, route.selected_tools)
-    att = attribute(route, res, rep, required_tools=route.selected_tools)
+    required = variant_a_required_set(q.main, ds.tool_deps)
+    assert required <= set(route.selected_tools)    # REAL check: router surfaced the required-arg spine
+    res = mock_run(_plan(ds, route, rep), ds.tool_deps, list(required))
+    att = attribute(route, res, rep, required_tools=list(required))
     assert res.completed is True
     assert att.outcome is Outcome.SUCCESS and att.blame is Blame.NONE
 
@@ -187,6 +195,9 @@ def test_full_path_contract_blame_when_dependency_dropped(ds, bm25):
     """Drop a param-source from the real router's selection → blame=CONTRACT (Scenario B)."""
     q = ds.query_by_id("q240")
     route = assemble_route_result(bm25.rank(q.query_text, q.query_id), ds.tool_deps)
+    # validate_email is a REQUIRED-arg source (it sits in the variant-A required-set), so dropping it is
+    # a genuine required-dependency miss — the substance of the CONTRACT case, not label noise.
+    assert "validate_email" in variant_a_required_set(q.main, ds.tool_deps)
     dropped = [t for t in route.selected_tools if t != "validate_email"]
     route_c = route.model_copy(update={"selected_tools": dropped})
     rep = check_invariants(route_c, ds.tool_deps)

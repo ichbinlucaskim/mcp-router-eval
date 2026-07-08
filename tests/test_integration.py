@@ -19,6 +19,7 @@ from mcp_router_eval.contracts import (
     ToolCall,
 )
 from mcp_router_eval.data.loader import Dataset, load
+from mcp_router_eval.eval.harness import variant_a_required_set
 from mcp_router_eval.executor.mock_tools import run as mock_run
 
 pytestmark = pytest.mark.skipif(
@@ -82,23 +83,27 @@ def test_scenario_B_contract_blame_on_real_data(ds):
     assert "audible_account_login.email" in att.evidence
 
 
-def test_same_drop_is_ROUTING_when_gold_is_the_required_set(ds):
-    """Honesty check: with required_tools = full gold, the SAME drop is ROUTING (upstream-wins).
+def test_same_drop_is_ROUTING_when_variant_a_is_the_required_set(ds):
+    """Honesty check: with required_tools = the harness's variant-A required-set, the SAME drop is
+    ROUTING (upstream-wins).
 
-    validate_email is itself a gold tool, so omitting it is a routing miss that dominates the
-    downstream contract symptom — documents the primary-vs-dependency nuance on real data.
+    validate_email is a REQUIRED-arg source, so it sits IN the variant-A required-set (ADR-0030);
+    omitting it is a routing miss that dominates the downstream contract symptom — documents the
+    primary-vs-dependency nuance on the real harness path.
     """
     q = ds.query_by_id("q240")
+    required = variant_a_required_set(q.main, ds.tool_deps)
+    assert "validate_email" in required                       # required-arg tool ⇒ a routing target
     selected = [t for t in q.required_tools if t != "validate_email"]
     route = _route(q, selected)
     rep = check_invariants(route, ds.tool_deps)
-    att = attribute(route, _failed_result(q), rep, required_tools=q.required_tools)
+    att = attribute(route, _failed_result(q), rep, required_tools=list(required))
     assert att.blame is Blame.ROUTING
     assert "validate_email" in att.evidence
 
 
 def test_success_path_blame_none(ds):
-    """Full gold selected + completed=True → SUCCESS / NONE (real data)."""
+    """Full gold selected + completed=True, scored against the variant-A required-set → SUCCESS / NONE."""
     q = ds.query_by_id("q240")
     route = _route(q, q.required_tools)
     rep = check_invariants(route, ds.tool_deps)
@@ -106,7 +111,7 @@ def test_success_path_blame_none(ds):
         query_id=q.query_id, trace_id="t", call_trace=[], completed=True,
         latency_ms=LatencyMs(routing=1, contract=1, execution=1, total=3), tools_used=[],
     )
-    att = attribute(route, result, rep, required_tools=q.required_tools)
+    att = attribute(route, result, rep, required_tools=list(variant_a_required_set(q.main, ds.tool_deps)))
     assert att.outcome is Outcome.SUCCESS and att.blame is Blame.NONE
 
 
@@ -124,14 +129,16 @@ def _plan(ds, order, rep):
 
 
 def test_mock_runner_success_end_to_end(ds):
-    """Full gold, topo order → mock runner completes → SUCCESS / NONE (real executor in the loop)."""
+    """Full gold selected + topo order, completion scored against the variant-A required-set (the harness
+    target, ADR-0030) → mock runner completes → SUCCESS / NONE (real executor in the loop)."""
     q = ds.query_by_id("q240")
+    required = variant_a_required_set(q.main, ds.tool_deps)
     order = ds.execution_order(q.required_tools)          # topo (deps first)
     route = _route(q, q.required_tools)
     rep = check_invariants(route, ds.tool_deps)
-    res = mock_run(_plan(ds, order, rep), ds.tool_deps, q.required_tools)
+    res = mock_run(_plan(ds, order, rep), ds.tool_deps, list(required))
     assert res.completed is True
-    att = attribute(route, res, rep, required_tools=q.required_tools)
+    att = attribute(route, res, rep, required_tools=list(required))
     assert att.outcome is Outcome.SUCCESS and att.blame is Blame.NONE
 
 
@@ -158,13 +165,14 @@ def test_mock_runner_scenario_B_contract(ds):
 def test_mock_runner_scenario_C_execution(ds):
     """Full closure but reversed order → main runs before its param-source → EXECUTION (C)."""
     q = ds.query_by_id("q240")
+    required = variant_a_required_set(q.main, ds.tool_deps)
     order = list(reversed(ds.execution_order(q.required_tools)))  # main-first: order violated
     route = _route(q, q.required_tools)
     rep = check_invariants(route, ds.tool_deps)           # closure intact (all selected)
     assert rep.closure_complete is True
-    res = mock_run(_plan(ds, order, rep), ds.tool_deps, q.required_tools)
+    res = mock_run(_plan(ds, order, rep), ds.tool_deps, list(required))
     assert res.completed is False
     dl = next(c for c in res.call_trace if c.tool_id == "download_audible_book")
     assert dl.ok is False and "session_id" in dl.error    # audible_account_login has not run yet
-    att = attribute(route, res, rep, required_tools=q.required_tools)
+    att = attribute(route, res, rep, required_tools=list(required))
     assert att.outcome is Outcome.FAILURE and att.blame is Blame.EXECUTION

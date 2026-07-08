@@ -19,6 +19,7 @@ from mcp_router_eval.contracts import Blame, ExecPlan, GateDecision, Outcome, Ro
 from mcp_router_eval.data.graph_build import build_graph
 from mcp_router_eval.data.loader import load, topo_order
 from mcp_router_eval.embedding.local import LocalEmbedder
+from mcp_router_eval.eval.harness import variant_a_required_set
 from mcp_router_eval.executor.mock_tools import run as mock_run
 from mcp_router_eval.routers.base import HOMOPHILY_NA, Router
 from mcp_router_eval.routers.gnn import GNNRouter
@@ -144,20 +145,38 @@ def test_determinism_same_checkpoint(env):
 # --------------------------------------------------------------------------- #
 # Full-pipeline integration — GNNRouter → closure → invariants → executor → attribution
 # --------------------------------------------------------------------------- #
+@pytest.mark.xfail(
+    reason=(
+        "ADR-0030 de-circularization (checkup step 5): the GNN (default hyperparams, rgcn seed 0) fails "
+        "to recover the variant-A required-arg spine on q240 — the main tool download_audible_book ranks "
+        "~387-507/573 and top-k is dominated by high-frequency TOOL_* tools (popularity / query-agnostic "
+        "collapse, a known GNN failure mode; training longer makes it worse). Deferred pending "
+        "popularity-debiasing + re-tuning (checkup steps 6-7); re-evaluate then and flip to a real "
+        "pass/fail. The assertion body below is the correct de-circularized check — it currently xfails, "
+        "it is NOT rewritten to assert failure."
+    ),
+    strict=False,   # a future debiasing fix that makes it pass surfaces as XPASS, not an error
+)
 def test_full_pipeline_integration(env):
+    # De-circularized (ADR-0030, checkup step 5): completion is scored against the variant-A required-set
+    # (the required-arg PARAMETER_* spine the harness uses), NOT route.selected_tools (which passes
+    # tautologically). This is the SAME honest check the BM25/naive/traversal tests use — the GNN just
+    # currently fails it (see the xfail reason), so the test is already correct for when it's revisited.
     ds = env["ds"]
     r = _router(env)
     q = ds.query_by_id("q240")
     route = r.route(q.query_text, q.query_id)              # pure ranking + shared closure (ADR 0021)
     rep = check_invariants(route, ds.tool_deps)
     assert rep.closure_complete is True                   # shared closure guarantees completeness
+    required = variant_a_required_set(q.main, ds.tool_deps)
+    assert required <= set(route.selected_tools)          # REAL check: router surfaced the required-arg spine
     order = topo_order(route.selected_tools, ds.tool_deps)
     plan = ExecPlan(
         query_id=q.query_id, query_text=q.query_text,
         bound_tools=[ds.tools[t] for t in order], invariant_report=rep,
         gate_decision=GateDecision.PASS, trace_id="t-gnn",
     )
-    res = mock_run(plan, ds.tool_deps, route.selected_tools)
-    att = attribute(route, res, rep, required_tools=route.selected_tools)
+    res = mock_run(plan, ds.tool_deps, list(required))
+    att = attribute(route, res, rep, required_tools=list(required))
     assert res.completed is True
     assert att.outcome is Outcome.SUCCESS and att.blame is Blame.NONE
