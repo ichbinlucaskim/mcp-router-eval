@@ -68,6 +68,24 @@ def test_loads_checkpoint_and_is_router(env):
     assert isinstance(r, Router) and r.name == "gnn_rgcn"
 
 
+def test_inference_is_plain_cosine_alpha_independent(env, tmp_path):
+    """STRONG (ADR-0031 amendment key fix): the router scores PLAIN cosine — the training logQ strength α
+    is NEVER applied at inference. Two checkpoints with IDENTICAL weights but config alpha=0 vs alpha=1
+    must produce byte-identical rank scores; α is loaded only for provenance."""
+    ds, graph, embedder = env["ds"], env["graph"], env["embedder"]
+    ckpt = torch.load(env["checkpoints"]["rgcn"], weights_only=False)
+    p0, p1 = tmp_path / "alpha0.pt", tmp_path / "alpha1.pt"
+    torch.save({**ckpt, "config": {**ckpt["config"], "alpha": 0.0}}, p0)     # same weights,
+    torch.save({**ckpt, "config": {**ckpt["config"], "alpha": 1.0}}, p1)     # differ ONLY in alpha
+    r0 = GNNRouter.from_checkpoint(p0, ds, graph, embedder)
+    r1 = GNNRouter.from_checkpoint(p1, ds, graph, embedder)
+    assert r0.train_alpha == 0.0 and r1.train_alpha == 1.0                   # provenance carried through
+    q = ds.query_by_id("q240")
+    s0 = [ts.score for ts in r0.rank(q.query_text, q.query_id).ranked_tools]
+    s1 = [ts.score for ts in r1.rank(q.query_text, q.query_id).ranked_tools]
+    assert s0 == s1                        # inference identical ⇒ −log Q is NOT applied at serving
+
+
 def test_rank_produces_valid_route_result(env):
     r = _router(env)
     ds = env["ds"]

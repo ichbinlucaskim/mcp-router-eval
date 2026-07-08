@@ -54,8 +54,13 @@ class GNNRouter(Router):
         *,
         backbone: str | None = None,
         top_k: int = DEFAULT_TOP_K,
+        train_alpha: float = 0.0,
     ) -> None:
         self._scorer = scorer.eval()  # inference mode: no dropout → deterministic
+        #: The checkpoint's training logQ-correction strength (ADR 0031 amendment) — kept for PROVENANCE
+        #: only. Inference scores PLAIN cosine (no −log Q); at serving all 573 tools are scored, so there
+        #: is no in-batch sampling bias to correct. rank() is independent of this value.
+        self.train_alpha = train_alpha
         self._embedder = embedder
         self._tool_ids = list(graph.node_ids)
         self._id_to_index = dict(graph.id_to_index)
@@ -83,7 +88,11 @@ class GNNRouter(Router):
         in_dim = node_feature_matrix(graph, dataset, embedder).shape[1]
         scorer = build_scorer(config, in_dim, query_dim=embedder.dim)
         scorer.load_state_dict(ckpt["state_dict"])
-        return cls(scorer, graph, dataset, embedder, backbone=config.backbone, top_k=top_k)
+        # config.alpha carried for provenance only; rank() never applies it (inference = plain cosine).
+        return cls(
+            scorer, graph, dataset, embedder,
+            backbone=config.backbone, top_k=top_k, train_alpha=getattr(config, "alpha", 0.0),
+        )
 
     # ---- node embeddings: one forward, cached per instance ----------------- #
     def _node_embeddings(self) -> torch.Tensor:
@@ -98,7 +107,9 @@ class GNNRouter(Router):
         with torch.no_grad():
             q_raw = torch.as_tensor(self._embedder.encode([query_text])[0], dtype=torch.float)
             q = self._scorer.query_embedding(q_raw)          # [d], unit
-            scores = (node @ q).cpu().numpy()                # [N] late cosine (matmul, no fusion MLP)
+            # PLAIN late cosine — no −log Q popularity term (ADR 0031 amendment: the logQ correction is
+            # training-only; at inference all 573 tools are scored, so there is no sampling bias to undo).
+            scores = (node @ q).cpu().numpy()                # [N] (matmul, no fusion MLP)
         ranked = ranked_from_scores(self._tool_ids, scores)
         top_k = [ts.tool_id for ts in ranked[: self._top_k]]
         confidence = normalize_confidence([ts.score for ts in ranked[: self._top_k]])

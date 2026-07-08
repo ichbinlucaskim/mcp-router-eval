@@ -22,6 +22,7 @@ from mcp_router_eval.routers.gnn_train import (
     build_masks,
     masked_infonce,
     split_queries,
+    train_log_q,
 )
 
 pytestmark = pytest.mark.skipif(
@@ -142,6 +143,77 @@ def test_masked_infonce_excludes_false_negatives():
     assert loss_masked >= 0.0
     # excluding the high-scoring false negative (tool1) lowers the loss vs counting it as a negative
     assert float(loss_masked) < float(loss_unmasked)
+
+
+# --------------------------------------------------------------------------- #
+# logQ popularity correction (ADR 0031 amendment) — TRAIN-only −α·log Q, training-time only
+# --------------------------------------------------------------------------- #
+def test_train_log_q_add1_smoothed_and_monotonic():
+    # 2 train queries, 3 tools: counts = [2, 1, 0]; add-1 → q = (3,2,1)/(3+3) = (0.5, 0.333, 0.167).
+    gold = torch.tensor([[True, True, False], [True, False, False]])
+    lq = train_log_q(gold)
+    expected = torch.log(torch.tensor([3.0, 2.0, 1.0]) / 6.0)
+    assert torch.allclose(lq, expected, atol=1e-6)
+    assert lq[0] > lq[1] > lq[2]                    # more frequent ⇒ higher (less negative) log Q
+    assert torch.isfinite(lq[2])                    # never-gold tool is finite (add-1, no log 0)
+
+
+def test_log_q_is_train_only(ctx):
+    t = _trainer(ctx, epochs=1, seed=0)
+    # log Q is derived ONLY from the train-split gold mask (ADR 0024 — no val/test fitting)
+    assert torch.equal(t._log_q, train_log_q(t._gold_train))
+    # spot check that validation gold does NOT enter: recomputing WITH val rows changes the vector
+    assert not torch.equal(t._log_q, train_log_q(torch.cat([t._gold_train, t._gold_val])))
+
+
+def test_alpha_zero_recovers_baseline_logits():
+    # alpha=0 (or log_q=None) leaves the InfoNCE loss EXACTLY as the pre-correction baseline.
+    # Non-dominating scores (tau=1.0) so the loss is meaningfully nonzero and alpha visibly moves it.
+    scores = torch.tensor([[1.0, 0.9, 0.5, 0.4]])
+    gold = torch.tensor([[True, False, False, False]])
+    dep = torch.tensor([[False, True, False, False]])          # tool1 masked out of the negatives
+    log_q = torch.tensor([-1.0, -2.0, -3.0, -4.0])
+    base = masked_infonce(scores, gold, dep, tau=1.0)
+    assert torch.equal(base, masked_infonce(scores, gold, dep, tau=1.0, log_q=log_q, alpha=0.0))
+    assert torch.equal(base, masked_infonce(scores, gold, dep, tau=1.0, log_q=None, alpha=1.0))
+    # a nonzero alpha DOES change the loss (the correction is actually applied)
+    assert not torch.equal(base, masked_infonce(scores, gold, dep, tau=1.0, log_q=log_q, alpha=1.0))
+
+
+def test_trainer_alpha_zero_matches_default(ctx):
+    # alpha defaults to 0.0; an explicit alpha=0 trains an identical trajectory (behavior-preserving).
+    h_default = _trainer(ctx, backbone="rgcn", epochs=3, seed=0).train()
+    h_alpha0 = _trainer(ctx, backbone="rgcn", epochs=3, seed=0, alpha=0.0).train()
+    assert h_default["train"] == h_alpha0["train"] and h_default["val"] == h_alpha0["val"]
+
+
+def test_alpha_downweights_high_freq_relative_to_rare(ctx):
+    # ADR-0031: α>0 lowers a high-frequency tool's TRAINING logit RELATIVE to a rare tool (the absolute
+    # level cancels in InfoNCE; only the relative frequency signal matters). Checked on the score matrix.
+    t = _trainer(ctx, epochs=1, seed=0)
+    ti = dict(ctx["graph"].id_to_index)
+    hi, lo = ti["get_wifi_status"], ti["download_audible_book"]   # frequent vs rare (in train gold)
+    assert t._log_q[hi] > t._log_q[lo]
+    t.scorer.eval()
+    with torch.no_grad():
+        row = t._score_batch(t._q_train[:1])[0] / t.config.tau    # training logits for one query
+    gap_alpha0 = (row[hi] - row[lo]).item()
+    corrected = row - 1.0 * t._log_q                              # alpha=1
+    gap_alpha1 = (corrected[hi] - corrected[lo]).item()
+    assert gap_alpha1 < gap_alpha0                                # high-freq tool drops relative to rare
+
+
+def test_logq_correction_keeps_one_forward_per_step(ctx):
+    # The correction is one broadcasted subtraction, not a loop: it adds NO extra GNN forward.
+    t = _trainer(ctx, epochs=1, batch_size=None, alpha=1.0)
+    t.train()
+    assert t.node_forward_count == 2                             # one train + one val forward, as before
+
+
+def test_determinism_with_alpha(ctx):
+    h1 = _trainer(ctx, backbone="rgcn", epochs=4, seed=3, alpha=1.0).train()
+    h2 = _trainer(ctx, backbone="rgcn", epochs=4, seed=3, alpha=1.0).train()
+    assert h1["train"] == h2["train"] and h1["val"] == h2["val"]  # same seed+alpha → identical trajectory
 
 
 # --------------------------------------------------------------------------- #

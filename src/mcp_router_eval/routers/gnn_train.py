@@ -56,6 +56,7 @@ __all__ = [
     "GNNTrainer",
     "split_queries",
     "build_masks",
+    "train_log_q",
     "masked_infonce",
     "build_scorer",
     "set_seed",
@@ -127,10 +128,33 @@ def build_masks(
 
 
 # --------------------------------------------------------------------------- #
+# Popularity correction (ADR 0031 amendment) — TRAIN-only log Q(t), applied in the training logits only
+# --------------------------------------------------------------------------- #
+def train_log_q(gold_train: torch.Tensor) -> torch.Tensor:
+    """Add-1-smoothed log popularity ``log Q(t)`` over the **TRAIN** gold mask ``[n_train, N]`` → ``[N]``.
+
+    ``Q(t) = (train gold count of t + 1) / (Σ_t counts + N)`` — a proper distribution over tools (sums to
+    1), Laplace-smoothed so a never-gold tool still has a finite ``log Q``. **Train-only** (ADR 0024): the
+    caller passes the *train* gold mask, so no val/test gold ever enters. Aligned to node order (the mask's
+    columns are the graph node index). The additive normalizer ``Σ counts + N`` is a constant across tools
+    and **cancels in InfoNCE's logsumexp**, so only the *relative* frequencies drive the correction.
+    """
+    counts = gold_train.sum(dim=0).to(torch.float)         # [N] train gold counts, in node order
+    q = (counts + 1.0) / (counts.sum() + counts.numel())   # add-1 smoothed; Σ_t q = 1, all q > 0
+    return torch.log(q)
+
+
+# --------------------------------------------------------------------------- #
 # Masked InfoNCE (ADR 0026) — vectorized, multi-positive
 # --------------------------------------------------------------------------- #
 def masked_infonce(
-    scores: torch.Tensor, gold: torch.Tensor, dep: torch.Tensor, tau: float
+    scores: torch.Tensor,
+    gold: torch.Tensor,
+    dep: torch.Tensor,
+    tau: float,
+    *,
+    log_q: torch.Tensor | None = None,
+    alpha: float = 0.0,
 ) -> torch.Tensor:
     """Multi-positive InfoNCE over ``[B, N]`` cosine scores with a false-negative mask.
 
@@ -138,8 +162,16 @@ def masked_infonce(
     positives plus the true negatives); the numerator is the query's gold tools. False-negative
     dependencies (``dep & ~gold``) are removed from the denominator so they are neither positive nor
     negative. ``loss = logsumexp(valid) − logsumexp(gold)`` averaged over queries that have gold.
+
+    **Popularity correction (ADR 0031 amendment).** When ``alpha != 0`` and ``log_q`` is given, the
+    training logit is ``cos(q,t)/τ − α·log Q(t)`` — one broadcasted subtraction of ``[N]`` over ``[B, N]``
+    that hits the positive *and* the in-batch negatives alike (the whole row). ``alpha == 0`` (or
+    ``log_q is None``) leaves the logits **exactly** as the pre-correction baseline. This is a
+    **training-time** device only; inference (``GNNRouter.rank``) scores plain cosine with no such term.
     """
     logits = scores / tau
+    if log_q is not None and alpha != 0.0:
+        logits = logits - alpha * log_q         # −α·log Q(t), broadcast [N] over [B, N] (ADR 0031 amend.)
     invalid = dep & ~gold                       # false negatives → drop from the denominator
     denom = logits.masked_fill(invalid, float("-inf"))
     numer = logits.masked_fill(~gold, float("-inf"))
@@ -159,6 +191,8 @@ class GNNTrainConfig:
     heads: int = DEFAULT_HEADS             # GAT only (ADR 0025 search {2,4})
     proj_dim: int | None = DEFAULT_PROJ_DIM
     tau: float = 0.1                       # InfoNCE temperature (ADR 0024/0025 validation-tuned)
+    alpha: float = 0.0                     # logQ popularity-correction strength (ADR 0031 amendment;
+                                           # 0 = off/baseline, 1 = standard −log Q; a grid axis, ADR 0029)
     lr: float = 1e-3                       # AdamW default (ADR 0026)
     weight_decay: float = 1e-4             # ADR 0026 search 1e-4..1e-2
     epochs: int = 30
@@ -215,6 +249,9 @@ class GNNTrainer:
         self._gold_train, self._dep_train = build_masks(train_q, self._tool_index, deps)
         self._gold_val, self._dep_val = build_masks(val_q, self._tool_index, deps)
 
+        # --- TRAIN-only popularity log Q(t) for the ADR-0031 logQ correction (never fit on val/test) ---
+        self._log_q = train_log_q(self._gold_train)   # [N], aligned to node order (ADR 0024/0031)
+
         # --- model + optimizer (ADR 0026) ---
         query_dim = self._q_train.shape[1]
         self.scorer = self._build_scorer(query_dim)
@@ -251,7 +288,11 @@ class GNNTrainer:
         return q @ node.T                          # [B, N] cosine matrix (matmul, no loop)
 
     def _loss_on(self, q: torch.Tensor, gold: torch.Tensor, dep: torch.Tensor) -> torch.Tensor:
-        return masked_infonce(self._score_batch(q), gold, dep, self.config.tau)
+        # Training-time logQ correction (ADR 0031 amendment): −α·log Q on the logits. alpha=0 → baseline.
+        return masked_infonce(
+            self._score_batch(q), gold, dep, self.config.tau,
+            log_q=self._log_q, alpha=self.config.alpha,
+        )
 
     def _batches(self, n: int):
         bs = self.config.batch_size or n
