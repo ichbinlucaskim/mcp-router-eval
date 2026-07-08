@@ -132,8 +132,10 @@ def test_comparison_structure_and_finite(env, tmp_path):
             # ADR-0030: both completion numbers reported; PRIMARY (variant-A) >= SECONDARY (full golden)
             assert 0.0 <= block["completion"]["rate_full_golden"] <= 1.0
             assert block["completion"]["rate"] >= block["completion"]["rate_full_golden"]
-            cond = block["transfer_loss"]["conditional"]
+            cond = block["transfer_loss"]["conditional"]               # PRIMARY: spine-conditioned (ADR-0028 amend)
             assert cond is None or 0.0 <= cond <= 1.0                   # finite OR the empty-denom sentinel
+            sec = block["transfer_loss"]["conditional_full_golden"]    # SECONDARY: full-gold-conditioned
+            assert sec is None or 0.0 <= sec <= 1.0                     # both reported (transparency)
             assert "sub_rates" in block["completion"]                   # decomposable
             assert isinstance(block["attribution"], dict)              # attribution breakdown present
     # headline present for every router (deep-slice conditional; None allowed)

@@ -16,18 +16,21 @@ from mcp_router_eval.eval.metrics import (
     ndcg_at_k,
     QueryResult,
     recall_at_k,
+    retrieval_success,
     transfer_loss_conditional,
     transfer_loss_difference,
 )
 
 
-def _qr(qid, ranked, gold, *, completed=True, completed_full_golden=None, name=True, schema=True,
-        dep=True, runtime=True, blame=None, depth=3, router="r"):
-    # completed_full_golden defaults to `completed` (full-golden ⇒ variant-A, since variant-A ⊆ gold);
-    # pass it explicitly to model a query that completes against variant-A but NOT the full golden set.
+def _qr(qid, ranked, gold, *, completed=True, completed_full_golden=None, required_set=None,
+        name=True, schema=True, dep=True, runtime=True, blame=None, depth=3, router="r"):
+    # completed_full_golden defaults to `completed` (full-golden ⇒ variant-A, since variant-A ⊆ gold).
+    # required_set (the variant-A spine — transfer_loss's PRIMARY target) defaults to `gold`, so pre-amendment
+    # tests keep their behavior (spine == gold); pass it explicitly to model spine ⊊ gold (label-noise tools).
     return QueryResult(
         query_id=qid, ranked_tools=tuple(ranked), gold=frozenset(gold), completed=completed,
         completed_full_golden=completed if completed_full_golden is None else completed_full_golden,
+        required_set=frozenset(gold if required_set is None else required_set),
         name_valid=name, schema_valid=schema, dependency_compliant=dep, runtime_success=runtime,
         blame=blame, closure_depth=depth, router_name=router,
     )
@@ -132,6 +135,52 @@ def test_transfer_loss_difference_secondary():
     results = [_qr(f"q{i}", ["g"], {"g"}, completed=(i % 2 == 0)) for i in range(4)]
     assert mean_recall_at_k(results, 10) == 1.0 and completion_rate(results) == 0.5
     assert transfer_loss_difference(results, 10, retrieval="recall") == 0.5
+
+
+# --------------------------------------------------------------------------- #
+# ADR-0028 amendment — retrieval_success conditions on the variant-A spine, not the full gold
+# --------------------------------------------------------------------------- #
+def test_retrieval_success_targets_spine_not_full_gold():
+    # ranked recalls the required-arg spine {g} at top but NOT the label-noise system tool {noise}.
+    r = _qr("q", ["g", "x"], {"g", "noise"}, required_set={"g"})   # gold has noise; spine is just g
+    assert retrieval_success(r, 10, target="required") is True     # PRIMARY: recall of spine {g} = 1.0
+    assert retrieval_success(r, 10, target="gold") is False        # SECONDARY: recall of {g,noise} = 0.5 < 1.0
+
+
+def test_deep_slice_conditional_defined_on_spine_when_full_gold_is_nan():
+    # The exact full_eval.json pathology: queries retrieve the spine but never the full (label-noise) gold.
+    results = [_qr(f"q{i}", ["g", "x"], {"g", "noise"}, required_set={"g"}, completed=(i % 2 == 0))
+               for i in range(4)]
+    # full-gold conditioned → nobody fully recalls {g, noise} → nan (the OLD n/a headline)
+    assert math.isnan(transfer_loss_conditional(results, 10, target="gold"))
+    # spine conditioned → all recall {g} → DEFINED; 2/4 fail completion → 0.5 (the n/a is resolved)
+    assert transfer_loss_conditional(results, 10, target="required") == 0.5
+
+
+def test_transfer_loss_captures_intended_signal():
+    # retrieves spine AND completes → 0 (NaiveRAG-like); retrieves spine but fails completion → 1.
+    completes = [_qr(f"c{i}", ["g"], {"g"}, required_set={"g"}, completed=True) for i in range(5)]
+    assert transfer_loss_conditional(completes, 10) == 0.0
+    fails = [_qr(f"f{i}", ["g"], {"g"}, required_set={"g"}, completed=False) for i in range(5)]
+    assert transfer_loss_conditional(fails, 10) == 1.0
+
+
+def test_gnn_like_transfer_loss_not_forced_to_a_value():
+    # HONEST: do NOT force the GNN to a value — the same computation path yields whatever the data gives.
+    retrieves_spine = [_qr("a", ["g"], {"g"}, required_set={"g"}, completed=False)]
+    assert transfer_loss_conditional(retrieves_spine, 10) == 1.0        # retrieves spine, fails completion
+    cannot_retrieve_spine = [_qr("b", ["x"], {"g"}, required_set={"g"}, completed=False)]
+    assert math.isnan(transfer_loss_conditional(cannot_retrieve_spine, 10))  # can't retrieve spine → honest nan
+
+
+def test_primary_spine_and_secondary_full_gold_both_computed():
+    # both numbers produced from the same results; they differ (primary defined, secondary nan here).
+    results = [_qr(f"q{i}", ["g", "x"], {"g", "noise"}, required_set={"g"}, completed=True) for i in range(3)]
+    primary = transfer_loss_conditional(results, 10, target="required")   # spine recalled → 0.0
+    secondary = transfer_loss_conditional(results, 10, target="gold")     # full gold not recalled → nan
+    assert primary == 0.0 and math.isnan(secondary)
+    # difference form is also target-aware and consistent (spine recall 1.0 − completion 1.0 = 0.0)
+    assert transfer_loss_difference(results, 10, target="required") == 0.0
 
 
 # --------------------------------------------------------------------------- #

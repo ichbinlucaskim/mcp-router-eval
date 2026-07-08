@@ -157,6 +157,7 @@ def evaluate_query(router, query: Query, dataset: Dataset) -> QueryResult:
         blame=None if result.completed else att.blame,
         closure_depth=S.closure_size(list(full_gold), tool_deps),
         router_name=route.router_name,
+        required_set=required_set,   # transfer_loss's PRIMARY retrieval-success target (ADR 0028 amend / 0030)
     )
 
 
@@ -188,8 +189,14 @@ def _metric_block(results: list[QueryResult], cfg: EvalConfig) -> dict:
             "sub_rates": M.completion_sub_rates(results),              # decomposition of the PRIMARY verdict
         },
         "transfer_loss": {
+            # PRIMARY (ADR-0028 amendment): retrieval-success conditions on the variant-A required-set (spine)
             "conditional": _nan_to_none(M.transfer_loss_conditional(results, k, threshold=cfg.threshold)),
             "difference": M.transfer_loss_difference(results, k),
+            # SECONDARY (transparency): the full-gold-conditioned numbers, where defined
+            "conditional_full_golden": _nan_to_none(
+                M.transfer_loss_conditional(results, k, threshold=cfg.threshold, target="gold")
+            ),
+            "difference_full_golden": M.transfer_loss_difference(results, k, target="gold"),
         },
         "attribution": {b.value: c for b, c in att.counts.items()},
     }

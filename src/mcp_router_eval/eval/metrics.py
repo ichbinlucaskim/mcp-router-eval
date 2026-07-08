@@ -67,6 +67,7 @@ class QueryResult:
     closure_depth: int                 # size of the PARAMETER_* closure (for depth slicing)
     router_name: str = "?"             # for the per-router breakdown
     completed_full_golden: bool = False  # SECONDARY completion — full golden_function_names (ADR 0030; reported, never in transfer_loss)
+    required_set: frozenset[str] = frozenset()  # variant-A required-arg spine — transfer_loss's PRIMARY retrieval-success target (ADR 0028 amend / 0030)
 
 
 # --------------------------------------------------------------------------- #
@@ -171,21 +172,38 @@ def completion_sub_rates(results: Sequence[QueryResult]) -> dict[str, float]:
 # --------------------------------------------------------------------------- #
 # 3. North-star transfer loss (ADR 0028)
 # --------------------------------------------------------------------------- #
-def retrieval_success(result: QueryResult, k: int = 10, *, threshold: float = 1.0) -> bool:
-    """Did retrieval succeed for this query? ``recall@k ≥ threshold`` (default 1.0 = all gold recalled)."""
-    return recall_at_k(result.ranked_tools, result.gold, k) >= threshold
+def _retrieval_target(result: QueryResult, target: str) -> frozenset[str]:
+    """The recall target for transfer_loss (ADR-0028 amendment). ``'required'`` (PRIMARY) = the variant-A
+    required-arg spine (``required_set``, the SAME set completion uses, ADR-0030); ``'gold'`` (SECONDARY)
+    = the full ``golden_function_names``."""
+    return result.required_set if target == "required" else result.gold
+
+
+def retrieval_success(
+    result: QueryResult, k: int = 10, *, threshold: float = 1.0, target: str = "required"
+) -> bool:
+    """Did retrieval succeed for this query? ``recall@k of the target ≥ threshold`` (default 1.0).
+
+    PRIMARY (ADR-0028 amendment / ADR-0030): the target is the **variant-A required-set** — the required-arg
+    ``PARAMETER_*`` spine completion uses — so the transfer conditions on retrieving the tools the task
+    actually needs, not the full label-noisy gold. ``target='gold'`` gives the SECONDARY full-gold
+    condition. Threshold semantics are unchanged (recall of the target ≥ threshold).
+    """
+    return recall_at_k(result.ranked_tools, _retrieval_target(result, target), k) >= threshold
 
 
 def transfer_loss_conditional(
-    results: Sequence[QueryResult], k: int = 10, *, threshold: float = 1.0
+    results: Sequence[QueryResult], k: int = 10, *, threshold: float = 1.0, target: str = "required"
 ) -> float:
-    """PRIMARY transfer loss = ``1 − P(completion | retrieval success)`` (ADR 0028).
+    """PRIMARY transfer loss = ``1 − P(completion | retrieval success)`` (ADR 0028, amended).
 
-    Of the queries whose retrieval succeeded (gold recalled at ``k``), the fraction that then **fail**
+    Of the queries whose retrieval succeeded (**variant-A spine** recalled at ``k`` — ``target='required'``;
+    or the full gold — ``target='gold'`` for the SECONDARY number), the fraction that then **fail**
     structural completion — GRETEL's ``P(functional|semantic)`` operationalized. **Empty denominator**
-    (no query's retrieval succeeded) → ``float('nan')`` (undefined, not a crash and not a fake 0).
+    (no query in the group retrieved the target) → ``float('nan')`` — an honest "couldn't even retrieve the
+    required tools", not a crash and not a fake 0.
     """
-    succeeded = [r for r in results if retrieval_success(r, k, threshold=threshold)]
+    succeeded = [r for r in results if retrieval_success(r, k, threshold=threshold, target=target)]
     if not succeeded:
         return float("nan")
     failed = sum(1 for r in succeeded if not r.completed)
@@ -193,15 +211,20 @@ def transfer_loss_conditional(
 
 
 def transfer_loss_difference(
-    results: Sequence[QueryResult], k: int = 10, *, retrieval: str = "recall"
+    results: Sequence[QueryResult], k: int = 10, *, retrieval: str = "recall", target: str = "required"
 ) -> float:
-    """SECONDARY transfer loss = ``retrieval_metric − completion_rate`` (descriptive level gap, ADR 0028)."""
-    retrieval_value = {
-        "recall": mean_recall_at_k,
-        "map": map_at_k,
-        "ndcg": mean_ndcg_at_k,
-    }[retrieval](results, k)
-    return retrieval_value - completion_rate(results)
+    """SECONDARY (descriptive) transfer loss = ``mean retrieval@k of the target − completion_rate``.
+
+    Recomputed against the **variant-A spine** by default (``target='required'``, ADR-0028 amendment), so it
+    is target-consistent with completion; ``target='gold'`` gives the full-gold descriptive gap.
+    """
+    per_query = {"recall": recall_at_k, "map": average_precision_at_k, "ndcg": ndcg_at_k}[retrieval]
+    if not results:
+        return -completion_rate(results)  # 0.0
+    mean_retrieval = sum(
+        per_query(r.ranked_tools, _retrieval_target(r, target), k) for r in results
+    ) / len(results)
+    return mean_retrieval - completion_rate(results)
 
 
 # --------------------------------------------------------------------------- #
