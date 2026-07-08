@@ -36,6 +36,7 @@ __all__ = [
     "mean_recall_at_k",
     "mean_ndcg_at_k",
     "completion_rate",
+    "completion_rate_full_golden",
     "completion_sub_rates",
     "retrieval_success",
     "transfer_loss_conditional",
@@ -56,8 +57,8 @@ class QueryResult:
 
     query_id: str
     ranked_tools: tuple[str, ...]      # full ranking, best-first (tool_ids)
-    gold: frozenset[str]               # gold/required tool set
-    completed: bool                    # structural completion verdict (ADR 0004)
+    gold: frozenset[str]               # full golden set — retrieval target (recall/map/nDCG)
+    completed: bool                    # PRIMARY structural completion — variant-A required-set (ADR 0004/0030)
     name_valid: bool                   # correct tool SET (all required invoked, none spurious)
     schema_valid: bool                 # call args type-valid against the schema
     dependency_compliant: bool         # PARAMETER_* order respected + every sourced arg available
@@ -65,6 +66,7 @@ class QueryResult:
     blame: Blame | None                # deterministic attribution (None on success)
     closure_depth: int                 # size of the PARAMETER_* closure (for depth slicing)
     router_name: str = "?"             # for the per-router breakdown
+    completed_full_golden: bool = False  # SECONDARY completion — full golden_function_names (ADR 0030; reported, never in transfer_loss)
 
 
 # --------------------------------------------------------------------------- #
@@ -125,10 +127,24 @@ def mean_ndcg_at_k(results: Sequence[QueryResult], k: int = 10) -> float:
 # 2. Structural completion (ADR 0004) — decomposable (ADR 0028)
 # --------------------------------------------------------------------------- #
 def completion_rate(results: Sequence[QueryResult]) -> float:
-    """Fraction of queries that structurally completed (ADR 0004). 0.0 if empty."""
+    """PRIMARY completion (ADR 0004/0030): fraction completing against the **variant-A required-set**.
+
+    0.0 if empty. This is the north-star completion; ``transfer_loss`` and the sub-rates key off it.
+    """
     if not results:
         return 0.0
     return sum(1 for r in results if r.completed) / len(results)
+
+
+def completion_rate_full_golden(results: Sequence[QueryResult]) -> float:
+    """SECONDARY completion (ADR 0030): fraction completing against the **full golden set**.
+
+    Reported alongside the PRIMARY :func:`completion_rate` for transparency (the required-set choice is
+    auditable), but **never** fed into ``transfer_loss``. 0.0 if empty.
+    """
+    if not results:
+        return 0.0
+    return sum(1 for r in results if r.completed_full_golden) / len(results)
 
 
 _SUB_RATE_KEYS = ("name_validity", "schema_adherence", "dependency_compliance", "runtime_success")

@@ -45,11 +45,18 @@ class Dep(NamedTuple):
         param: the required parameter name this dependency sources. ``PARAMETER_*`` edges always
             carry one (per inspection); may be ``None`` for non-parameter relations.
         relation: which of the 4 :class:`EdgeType` relations this dependency is.
+        required: whether ``param`` is a **required** argument of the *owning* (dependent) tool
+            (ADR-0030 §3). Only required-argument sources are completion requirements; an
+            **optional**-argument source (or a param-less ``PARAMETER_*`` edge) is *ordering-only if
+            present* and must not make a closure incomplete / a param dangling. Defaults to ``True``
+            (conservative) so hand-built fixtures that omit it keep the pre-ADR-0030 behavior; the
+            loader sets it precisely from each tool's JSON-Schema ``required`` list.
     """
 
     source: str
     param: str | None
     relation: EdgeType
+    required: bool = True
 
 
 def check_invariants(
@@ -66,10 +73,11 @@ def check_invariants(
 
     Returns:
         InvariantReport with:
-          * ``closure_complete`` — True iff every ``PARAMETER_*`` dependency of every selected tool
-            is itself in ``selected_tools``.
-          * ``dangling_params`` — ``"tool.param"`` for each required param whose sourcing tool is not
-            selected (Scenario B, the thesis-critical case). Sorted, de-duplicated.
+          * ``closure_complete`` — True iff every **required-argument** ``PARAMETER_*`` dependency
+            (:attr:`Dep.required`) of every selected tool is itself in ``selected_tools``. Optional-arg
+            and param-less ``PARAMETER_*`` sources are ordering-only and never break closure (ADR-0030).
+          * ``dangling_params`` — ``"tool.param"`` for each **required** param whose sourcing tool is
+            not selected (Scenario B, the thesis-critical case). Sorted, de-duplicated.
           * ``violations`` — human-readable messages for every missing dependency and dangling param.
             Sorted, de-duplicated.
     """
@@ -84,7 +92,12 @@ def check_invariants(
                 continue
             if dep.source in selected:
                 continue
-            # Missing param-source dependency: fails closure ...
+            if not dep.required:
+                # ADR-0030 §3: an OPTIONAL-argument (or param-less) PARAMETER_* source is ordering-only
+                # if present — its absence is neither a closure gap nor a dangling param. This aligns
+                # the checker with the mock runner (mock_tools.py: only *required* params fail a call).
+                continue
+            # Missing REQUIRED param-source dependency: fails closure ...
             closure_complete = False
             violations.add(f"missing dependency {dep.source} required by {tool}")
             # ... and leaves the consuming parameter dangling.

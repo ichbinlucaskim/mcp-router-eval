@@ -10,12 +10,15 @@ from mcp_router_eval.contracts import Blame
 from mcp_router_eval.data.graph_build import build_graph
 from mcp_router_eval.data.loader import load
 from mcp_router_eval.embedding.local import LocalEmbedder
+from mcp_router_eval.contract_layer.invariants import check_invariants
+from mcp_router_eval.contracts import RouteResult
 from mcp_router_eval.eval.harness import (
     EVAL_DIR,
     EvalConfig,
     build_routers,
     evaluate,
     evaluate_query,
+    variant_a_required_set,
 )
 from mcp_router_eval.eval.metrics import QueryResult
 from mcp_router_eval.eval.slices import DEEP, MEDIUM, SHALLOW
@@ -44,6 +47,41 @@ def env(st_model, tmp_path_factory):
     trainer.train()
     ckpt = trainer.save_checkpoint(tmp_path_factory.mktemp("ck") / "rgcn.pt")
     return {"ds": ds, "graph": graph, "embedder": embedder, "ckpt": ckpt}
+
+
+# --------------------------------------------------------------------------- #
+# ADR-0030 — variant-A completion required-set (real data; no GNN, so fast/no training)
+# --------------------------------------------------------------------------- #
+def test_variant_a_required_set_q240_is_the_3_tool_spine():
+    """q240's variant-A completion required-set is EXACTLY the required-arg PARAMETER_* spine.
+
+    Ground truth (ADR-0030): [validate_email, audible_account_login, download_audible_book];
+    get_system_language is EXCLUDED because it sources the OPTIONAL `language` arg (required-arg rule),
+    not because its edge is TOOL_*. The set is a STRICT subset of the full golden set (the decouple).
+    """
+    ds = load()
+    q = ds.query_by_id("q240")
+    req = variant_a_required_set(q.main, ds.tool_deps)
+    assert req == frozenset({"validate_email", "audible_account_login", "download_audible_book"})
+    assert len(req) == 3
+    assert "get_system_language" not in req                      # optional-arg source excluded
+    assert req < frozenset(q.required_tools)                     # strict subset of full golden (decoupled)
+
+
+def test_optional_source_absent_not_dangling_on_real_data():
+    """Selecting only the variant-A set (get_system_language absent) is closure-complete on real data.
+
+    The loader sets Dep.required from each tool's schema; audible_account_login.language is optional,
+    so its absent source must NOT be flagged dangling (ADR-0030 §3)."""
+    ds = load()
+    q = ds.query_by_id("q240")
+    variant_a = ["validate_email", "audible_account_login", "download_audible_book"]
+    route = RouteResult(
+        query_id=q.query_id, query_text=q.query_text, selected_tools=variant_a,
+        confidence=0.5, homophily_local=0.0, router_name="test",
+    )
+    rep = check_invariants(route, ds.tool_deps)
+    assert rep.closure_complete is True and rep.dangling_params == []
 
 
 # --------------------------------------------------------------------------- #
@@ -91,6 +129,9 @@ def test_comparison_structure_and_finite(env, tmp_path):
             r = block["retrieval"]
             assert all(0.0 <= v <= 1.0 for v in r.values())             # retrieval metrics finite in [0,1]
             assert 0.0 <= block["completion"]["rate"] <= 1.0
+            # ADR-0030: both completion numbers reported; PRIMARY (variant-A) >= SECONDARY (full golden)
+            assert 0.0 <= block["completion"]["rate_full_golden"] <= 1.0
+            assert block["completion"]["rate"] >= block["completion"]["rate_full_golden"]
             cond = block["transfer_loss"]["conditional"]
             assert cond is None or 0.0 <= cond <= 1.0                   # finite OR the empty-denom sentinel
             assert "sub_rates" in block["completion"]                   # decomposable

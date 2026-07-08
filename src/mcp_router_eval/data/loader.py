@@ -134,8 +134,17 @@ def load(processed_dir: Path = PROCESSED_DIR) -> Dataset:
             schema=rec["schema"],  # alias for schema_
             deps=sorted({d["source"] for d in rec["deps"]}),
         )
+        # ADR-0030 §3: mark each dep as required/optional by whether its sourced param is a REQUIRED
+        # argument of THIS (dependent) tool. Only required-arg sources are completion requirements;
+        # optional-arg (or param-less) sources are ordering-only.
+        _required_args = set(rec["schema"].get("required") or [])
         tool_deps[tid] = [
-            Dep(source=d["source"], param=d["param"], relation=EdgeType(d["relation"]))
+            Dep(
+                source=d["source"],
+                param=d["param"],
+                relation=EdgeType(d["relation"]),
+                required=d["param"] is not None and d["param"] in _required_args,
+            )
             for d in rec["deps"]
         ]
 

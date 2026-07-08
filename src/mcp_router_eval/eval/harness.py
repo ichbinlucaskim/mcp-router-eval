@@ -26,7 +26,7 @@ from pathlib import Path
 
 from mcp_router_eval.contract_layer.attribution import attribute
 from mcp_router_eval.contract_layer.invariants import check_invariants
-from mcp_router_eval.contracts import ExecPlan, GateDecision, RouteResult
+from mcp_router_eval.contracts import ORDERING_RELATIONS, ExecPlan, GateDecision, RouteResult
 from mcp_router_eval.data.graph_build import build_graph
 from mcp_router_eval.data.loader import Dataset, Query, topo_order
 from mcp_router_eval.embedding.base import Embedder
@@ -85,10 +85,41 @@ def _route(router, query: Query, tool_deps) -> RouteResult:
     return assemble_route_result(router.rank(query.query_text, query.query_id), tool_deps)
 
 
+def variant_a_required_set(main: str, tool_deps) -> frozenset[str]:
+    """The **completion required-set** (ADR-0030 variant A) for a query, anchored on its ``main`` gold tool.
+
+    The transitive ``PARAMETER_*`` closure of ``main`` **restricted to edges that source a *required*
+    argument** of the dependent tool (``Dep.required``). Optional-argument sources are *excluded* — e.g.
+    for q240 this yields exactly ``{validate_email, audible_account_login, download_audible_book}``;
+    ``get_system_language`` is dropped because it sources the OPTIONAL ``language`` arg (not because its
+    edge is ``TOOL_*``).
+
+    This is the ADR-0030 decouple made visible in code: the filter lives **here, at the completion-scoring
+    point**, so the execution/ordering closure (:func:`routers.closure.expand_closure`, variant B) is left
+    untouched and the completion required-set is a strict subset of it.
+    """
+    required: set[str] = {main}
+    changed = True
+    while changed:
+        changed = False
+        for tool in sorted(required):
+            for dep in tool_deps.get(tool, ()):
+                if dep.relation in ORDERING_RELATIONS and dep.required and dep.source not in required:
+                    required.add(dep.source)
+                    changed = True
+    return frozenset(required)
+
+
 def evaluate_query(router, query: Query, dataset: Dataset) -> QueryResult:
-    """Run rank → closure → invariants → executor → attribution for one (query, router)."""
+    """Run rank → closure → invariants → executor → attribution for one (query, router).
+
+    Completion is scored against the **variant-A required-set** (required-arg ``PARAMETER_*`` closure of
+    the query's main tool, ADR-0030) as the PRIMARY verdict, and against the **full golden set** as a
+    SECONDARY reported number. Retrieval metrics (``gold``) stay against the full golden set.
+    """
     tool_deps = dataset.tool_deps
-    gold = frozenset(query.required_tools)
+    full_gold = frozenset(query.required_tools)                   # retrieval target + SECONDARY completion
+    required_set = variant_a_required_set(query.main, tool_deps)  # PRIMARY completion target (ADR-0030 A)
     route = _route(router, query, tool_deps)
 
     report = check_invariants(route, tool_deps)
@@ -98,12 +129,16 @@ def evaluate_query(router, query: Query, dataset: Dataset) -> QueryResult:
         bound_tools=[dataset.tools[t] for t in order], invariant_report=report,
         gate_decision=GateDecision.PASS, trace_id=f"eval-{router_name(router)}-{query.query_id}",
     )
-    result = mock_run(plan, tool_deps, list(gold))
-    att = attribute(route, result, report, required_tools=list(gold))
+    # PRIMARY run drives completed / attribution / sub-rates. `required_tools` only gates the tool-SET
+    # check, so a second run with the full golden set isolates the SECONDARY verdict on the identical
+    # plan/order/calls (no re-plumbing of the executor; ordering + type-validity are unchanged).
+    result = mock_run(plan, tool_deps, list(required_set))
+    result_full_golden = mock_run(plan, tool_deps, list(full_gold))
+    att = attribute(route, result, report, required_tools=list(required_set))
 
     # Decompose completion (ADR 0028) from the concrete run signals (no error-string coupling):
     tools_used = set(result.tools_used)
-    name_valid = gold <= tools_used                                     # correct tool SET recalled
+    name_valid = required_set <= tools_used                             # correct (variant-A) tool SET recalled
     runtime_success = all(c.ok for c in result.call_trace)              # every call ok
     dependency_compliant = report.closure_complete and not report.dangling_params
     # A runtime failure not explained by dependency non-compliance is a schema/type failure.
@@ -112,14 +147,15 @@ def evaluate_query(router, query: Query, dataset: Dataset) -> QueryResult:
     return QueryResult(
         query_id=query.query_id,
         ranked_tools=tuple(ts.tool_id for ts in route.ranked_tools),
-        gold=gold,
-        completed=result.completed,
+        gold=full_gold,
+        completed=result.completed,                                    # PRIMARY (variant-A)
+        completed_full_golden=result_full_golden.completed,            # SECONDARY (full golden)
         name_valid=name_valid,
         schema_valid=schema_valid,
         dependency_compliant=dependency_compliant,
         runtime_success=runtime_success,
         blame=None if result.completed else att.blame,
-        closure_depth=S.closure_size(list(gold), tool_deps),
+        closure_depth=S.closure_size(list(full_gold), tool_deps),
         router_name=route.router_name,
     )
 
@@ -147,8 +183,9 @@ def _metric_block(results: list[QueryResult], cfg: EvalConfig) -> dict:
             f"ndcg@{k}": M.mean_ndcg_at_k(results, k),
         },
         "completion": {
-            "rate": M.completion_rate(results),
-            "sub_rates": M.completion_sub_rates(results),
+            "rate": M.completion_rate(results),                        # PRIMARY (variant-A required-set, ADR-0030)
+            "rate_full_golden": M.completion_rate_full_golden(results),  # SECONDARY (full golden_function_names)
+            "sub_rates": M.completion_sub_rates(results),              # decomposition of the PRIMARY verdict
         },
         "transfer_loss": {
             "conditional": _nan_to_none(M.transfer_loss_conditional(results, k, threshold=cfg.threshold)),
@@ -183,15 +220,20 @@ def build_comparison(results_by_router: dict[str, list[QueryResult]], cfg: EvalC
 
 
 def render_table(comparison: dict) -> str:
-    """A compact readable table: router × {overall completion, deep completion, deep transfer_loss}."""
-    lines = ["router            overall_compl  deep_compl  deep_transfer_loss"]
+    """A compact readable table: router × {overall completion primary/secondary, deep completion, deep TL}.
+
+    ``compl(A)`` is the PRIMARY variant-A completion; ``compl(full)`` the SECONDARY full-golden number
+    (ADR-0030) — reported side-by-side so the required-set choice is auditable.
+    """
+    lines = ["router            compl(A)  compl(full)  deep_compl(A)  deep_transfer_loss"]
     for name, rep in comparison["routers"].items():
         overall = rep["overall"]["completion"]["rate"]
+        overall_fg = rep["overall"]["completion"]["rate_full_golden"]
         deep = rep["slices"][S.DEEP]
         deep_compl = deep["completion"]["rate"]
         deep_tl = deep["transfer_loss"]["conditional"]
         deep_tl_s = "  n/a" if deep_tl is None else f"{deep_tl:.3f}"
-        lines.append(f"{name:16s}  {overall:12.3f}  {deep_compl:9.3f}  {deep_tl_s:>17s}")
+        lines.append(f"{name:16s}  {overall:8.3f}  {overall_fg:11.3f}  {deep_compl:13.3f}  {deep_tl_s:>17s}")
     return "\n".join(lines)
 
 

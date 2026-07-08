@@ -8,6 +8,7 @@ from mcp_router_eval.eval.metrics import (
     attribution_breakdown,
     average_precision_at_k,
     completion_rate,
+    completion_rate_full_golden,
     completion_sub_rates,
     map_at_k,
     mean_ndcg_at_k,
@@ -20,10 +21,13 @@ from mcp_router_eval.eval.metrics import (
 )
 
 
-def _qr(qid, ranked, gold, *, completed=True, name=True, schema=True, dep=True, runtime=True,
-        blame=None, depth=3, router="r"):
+def _qr(qid, ranked, gold, *, completed=True, completed_full_golden=None, name=True, schema=True,
+        dep=True, runtime=True, blame=None, depth=3, router="r"):
+    # completed_full_golden defaults to `completed` (full-golden ⇒ variant-A, since variant-A ⊆ gold);
+    # pass it explicitly to model a query that completes against variant-A but NOT the full golden set.
     return QueryResult(
         query_id=qid, ranked_tools=tuple(ranked), gold=frozenset(gold), completed=completed,
+        completed_full_golden=completed if completed_full_golden is None else completed_full_golden,
         name_valid=name, schema_valid=schema, dependency_compliant=dep, runtime_success=runtime,
         blame=blame, closure_depth=depth, router_name=router,
     )
@@ -71,6 +75,21 @@ def test_completion_rate():
     results = [_qr(f"q{i}", ["a"], {"a"}, completed=(i < 7)) for i in range(10)]  # 7/10 complete
     assert completion_rate(results) == 0.7
     assert completion_rate([]) == 0.0
+
+
+def test_primary_variant_a_completion_exceeds_secondary_full_golden():
+    # ADR-0030: PRIMARY (variant-A required-set) completion is >= SECONDARY (full-golden) completion,
+    # because variant-A ⊆ golden (fewer tools required ⇒ easier to satisfy). Model the direction of the
+    # real BM25 spread (0.877 vs 0.098): all complete against variant-A, only some against full golden.
+    results = [
+        _qr("a", ["x"], {"x"}, completed=True, completed_full_golden=True),
+        _qr("b", ["x"], {"x"}, completed=True, completed_full_golden=False),
+        _qr("c", ["x"], {"x"}, completed=True, completed_full_golden=False),
+    ]
+    assert completion_rate(results) == 1.0                     # PRIMARY (variant-A)
+    assert completion_rate_full_golden(results) == 1 / 3       # SECONDARY (full golden) — strictly lower
+    assert completion_rate(results) >= completion_rate_full_golden(results)
+    assert completion_rate_full_golden([]) == 0.0
 
 
 def test_sub_rates_isolate_the_cause():
