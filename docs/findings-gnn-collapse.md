@@ -15,8 +15,10 @@ their ADRs.
 GraphSAGE — ADR 0010) and the entire searched hyperparameter space —
 `hidden × dropout × heads × τ × lr × weight_decay` (`eval/tuning.py:45-52`), plus the logQ strength
 `α ∈ {0, 0.5, 1}` (ADR 0031; `eval/tuning.py` `ALPHAS`) and the initial-residual strength
-`α_res ∈ {0, 0.1, 0.5, 0.8}` (ADR-0025 amendment) — collapse to the **same** variant-A completion
-**0.000** on the validation split.
+`α_res ∈ {0, 0.1, 0.5, 0.8}` (ADR-0025 amendment) — collapse: **R-GCN and SAGE fully to 0.000**, and
+**GAT to a marginal 0.052 ± 0.022** variant-A completion (test split). GAT is the one micro-deviation, and
+it *supports* the story rather than breaking it (see below); every configuration remains overwhelmingly
+collapsed relative to NaiveRAG's **0.970** on the same features.
 
 The one thing every one of those configs shares is the **message-passing paradigm**. That is the cause.
 Message passing assumes **homophily** — connected nodes are similar, so mixing a node with its neighbors
@@ -110,7 +112,35 @@ sufficient for the collapse,"** *not* "message passing is the only possible caus
   shortcut.
 
 Together: no tested knob — across three backbones, the full architecture/optimizer grid, `α`, and
-`α_res` — ever moved variant-A completion off **0.000**. The collapse is **config-invariant**.
+`α_res` — moved variant-A completion **materially** off the floor. R-GCN and SAGE stay at **0.000**; GAT's
+best is **0.052**. The collapse is **config-invariant** in magnitude.
+
+### The GAT micro-signal (0.052) — real retrieval, mechanism-consistent, still collapsed
+
+GAT is the one backbone above 0.000, so it deserves a precise account (measured on the full-eval
+checkpoints, test split n=236):
+
+- **It is real retrieval, not an artifact.** GAT surfaces the query's main tool in top-10 for **7 / 22 / 12
+  / 12 / 9** queries across the 5 seeds, and its completion count **equals** that main-in-top-10 count every
+  seed (7=7, 22=22, 11≈12, 12=12, 9=9) — completion never occurs without the main tool retrieved. R-GCN and
+  SAGE surface it for **0/236**.
+- **Partially seed-stable.** Of the ~12/236 successes per seed, **4 succeed in all 5 seeds** and ~8 in ≥4;
+  ~14 flicker (6 succeed in a single seed). A small stable core plus a noisy tail — the ±0.022 is genuine
+  seed variance, not the whole effect.
+- **The driver is a weaker frequency bias, NOT less over-smoothing.** GAT's `corr(gold_freq, mean_rank)` is
+  **−0.21** vs R-GCN/SAGE **−0.24** — marginally less frequency-dominated scoring, just enough to slip the
+  main tool into top-10 for a few queries. But GAT **over-smooths as much or more**: node-embedding mean
+  pairwise cosine **0.84** (GAT) ≥ **0.75** (R-GCN). So the initial *"attention down-weights the hub → less
+  over-smoothing"* hypothesis is **refuted**; the micro-signal comes from the ranking being slightly less
+  frequency-aligned, not from preserved node distinctiveness.
+- **Still an overwhelming collapse.** 0.052 vs NaiveRAG **0.970**; `main∈top-10` ~12/236 (5%) vs 227/235
+  (96.6%). GAT does not escape the collapse — it is a marginal deviation *inside* it, and it **supports**
+  the frequency/hub-driven account (a weaker frequency bias buys a little retrieval) rather than
+  contradicting it.
+
+*(Caveat: raw GATConv attention weights were not extracted — that needs `return_attention_weights`. The
+over-smoothing refutation rests on the downstream node-pairwise-cosine outcome (0.84 ≥ 0.75), which is
+sufficient to reject the "attention reduces over-smoothing" path regardless of the raw weights.)*
 
 ## Evaluation fairness — is the collapse a real limitation, or our design's fault?
 
@@ -148,7 +178,8 @@ tool-dependency graphs with these measured properties, not a general verdict on 
 ## Practical takeaway
 
 For tool routing with these data characteristics, a **learning-free dense-retrieval baseline beats a
-dependency-aware GNN**: NaiveRAG **0.970** vs GNN **0.000** variant-A completion on identical features.
+dependency-aware GNN**: NaiveRAG **0.970** vs GNN **≤ 0.052** variant-A completion (R-GCN/SAGE 0.000, GAT
+0.052) on identical features.
 Paradoxically, the GNN's *ability to learn* is what lets it learn the bad shortcut, while NaiveRAG (no
 learning) cannot and so avoids it. **Verify simple retrieval baselines before reaching for graph learning
 on dependency graphs of this character.**
