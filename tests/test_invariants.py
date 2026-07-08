@@ -116,3 +116,34 @@ def test_only_parameter_relation_types_participate():
     assert rep.closure_complete is False
     assert rep.dangling_params == ["t.p"]
     assert not any("tool_src" in v for v in rep.violations)
+
+
+# --------------------------------------------------------------------------- #
+# ADR-0030 §3 — an OPTIONAL PARAMETER_* source is ordering-only, never a completion requirement
+# --------------------------------------------------------------------------- #
+# The real q240 shape: audible_account_login needs a REQUIRED `email` (from validate_email) and an
+# OPTIONAL `language` (from get_system_language). Dep.required encodes the distinction.
+_OPT_DEPS = {
+    "audible_account_login": [
+        Dep("validate_email", "email", EdgeType.PARAM_DIRECT, required=True),
+        Dep("get_system_language", "language", EdgeType.PARAM_INDIRECT, required=False),
+    ],
+    "validate_email": [],
+}
+
+
+def test_absent_optional_arg_source_is_not_dangling_and_keeps_closure():
+    # get_system_language (optional `language`) is NOT selected. Under ADR-0030 that must NOT break
+    # closure or dangle a param — the optional source is ordering-only-if-present.
+    rep = check_invariants(_route(["audible_account_login", "validate_email"]), _OPT_DEPS)
+    assert rep == InvariantReport(closure_complete=True, dangling_params=[], violations=[])
+
+
+def test_absent_required_arg_source_still_dangles_and_breaks_closure():
+    # Counterpart: dropping validate_email (REQUIRED `email`) DOES dangle + break closure (CONTRACT),
+    # while the also-absent OPTIONAL get_system_language is never flagged.
+    rep = check_invariants(_route(["audible_account_login"]), _OPT_DEPS)
+    assert rep.closure_complete is False
+    assert rep.dangling_params == ["audible_account_login.email"]      # only the required-arg source
+    assert not any("get_system_language" in v for v in rep.violations)  # optional source never flagged
+    assert not any("language" in v for v in rep.violations)

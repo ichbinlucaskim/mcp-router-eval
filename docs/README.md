@@ -151,7 +151,7 @@ Title / Status / Context / Decision / Consequences / Alternatives considered.
 | [0001](adr/0001-toollinkos-sole-primary-benchmark.md) | ToolLinkOS is the sole primary benchmark; ToolSandbox demoted to stretch | Accepted |
 | [0002](adr/0002-executor-claude-agent-sdk.md) | Executor = Claude Code via claude-agent-sdk with mock tools as MCP tools | Accepted |
 | [0003](adr/0003-embedding-provider-interface.md) | Embedding behind a provider interface; LocalEmbedder(BGE) default, ada-002 optional | Accepted |
-| [0004](adr/0004-completion-structural-proxy.md) | Completion is a structural proxy, not semantic success | Accepted |
+| [0004](adr/0004-completion-structural-proxy.md) | Completion is a structural proxy, not semantic success | Accepted (amended 2026-07-05; amendment's required-set A/B point superseded by [0030](adr/0030-completion-required-set.md)) |
 | [0005](adr/0005-closure-depth-slices.md) | Query slice = closure-depth buckets (shallow 2-3 / deep >=6) | Accepted |
 | [0006](adr/0006-four-edge-types.md) | 4 real dependency edge types; "core" is a node feature | Accepted |
 | [0007](adr/0007-pyg-over-dgl.md) | GNN framework = PyTorch Geometric (not DGL) | Accepted |
@@ -172,6 +172,10 @@ Title / Status / Context / Decision / Consequences / Alternatives considered.
 | [0022](adr/0022-gnn-formulation-query-conditioned-scoring.md) | GNN router formulation = query-conditioned node scoring (not link prediction / node classification) | Accepted (amended 2026-07-05) |
 | [0023](adr/0023-gnn-negative-sampling.md) | GNN negative sampling = in-batch negatives + dependency-structure false-negative filter; hard negatives conservative | Accepted |
 | [0024](adr/0024-gnn-split-and-leakage.md) | GNN split = query-level (transductive graph shared); leakage prevented by train-only stats + tuning-only validation | Accepted |
-| [0025](adr/0025-gnn-architecture-hyperparameters.md) | GNN architecture: 2 layers fixed; hidden dim / GAT heads / dropout searched on validation | Accepted |
+| [0025](adr/0025-gnn-architecture-hyperparameters.md) | GNN architecture: 2 layers fixed; hidden dim / GAT heads / dropout searched on validation | Accepted (amended 2026-07-05 — adds a GCNII-style initial residual to counter hub-amplification collapse; supersedes the "no residual" line) |
 | [0026](adr/0026-gnn-training-setup.md) | GNN training setup: InfoNCE over in-batch negatives; AdamW; warm-up not required at our scale | Accepted |
 | [0027](adr/0027-homophily-local-definition.md) | homophily_local = node-level feature homophily (mean cosine to PARAMETER_* dependency neighbors) | Accepted |
+| [0028](adr/0028-evaluation-metrics.md) | Evaluation metrics = standard retrieval + structural completion + north-star transfer loss, sliced by depth, deterministic attribution | Accepted (amended 2026-07-05 — transfer_loss's retrieval_success conditions on the variant-A required-set, aligning it with ADR-0030) |
+| [0029](adr/0029-validation-tuning-protocol.md) | Validation tuning = deterministic grid search over the small discrete space; best by validation completion_rate (mAP@10 tiebreaker); multi-seed | Accepted |
+| [0030](adr/0030-completion-required-set.md) | Completion required-set = required-argument PARAMETER_* closure (variant A), decoupled from the execution/ordering closure; supersedes the ADR-0004 amendment's A/B ambiguity | Accepted |
+| [0031](adr/0031-gnn-popularity-debiasing.md) | GNN popularity debiasing = logQ correction in InfoNCE (contrastive–IPW equivalence, train-only frequency); with a note that the ADR-0023 false-negative filter may have weakened popularity suppression | Accepted (amended 2026-07-05 — logQ is a training-time `−log Q` logit correction, removed at inference) |

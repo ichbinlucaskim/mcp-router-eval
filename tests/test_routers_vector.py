@@ -16,6 +16,7 @@ from mcp_router_eval.contract_layer.invariants import check_invariants
 from mcp_router_eval.contracts import Blame, ExecPlan, GateDecision, Outcome, RouteResult
 from mcp_router_eval.data.loader import load, topo_order
 from mcp_router_eval.embedding.local import LocalEmbedder
+from mcp_router_eval.eval.harness import variant_a_required_set
 from mcp_router_eval.executor.mock_tools import run as mock_run
 from mcp_router_eval.routers.base import (
     HOMOPHILY_NA,
@@ -182,12 +183,17 @@ def _plan(ds, route, rep):
 
 
 def test_full_path_success_through_naive(ds, naive):
+    # De-circularized (ADR-0030, checkup step 5): score completion against the variant-A required-set
+    # (the required-arg PARAMETER_* spine the harness uses), not route.selected_tools (tautological).
+    # This verifies the dense router actually recovered the required-arg tools for q240.
     q = ds.query_by_id("q240")
     route = assemble_route_result(naive.rank(q.query_text, q.query_id), ds.tool_deps)
     rep = check_invariants(route, ds.tool_deps)
     assert rep.closure_complete is True
-    res = mock_run(_plan(ds, route, rep), ds.tool_deps, route.selected_tools)
-    att = attribute(route, res, rep, required_tools=route.selected_tools)
+    required = variant_a_required_set(q.main, ds.tool_deps)
+    assert required <= set(route.selected_tools)    # REAL check: router surfaced the required-arg spine
+    res = mock_run(_plan(ds, route, rep), ds.tool_deps, list(required))
+    att = attribute(route, res, rep, required_tools=list(required))
     assert res.completed is True
     assert att.outcome is Outcome.SUCCESS and att.blame is Blame.NONE
 
@@ -197,6 +203,7 @@ def test_full_path_contract_blame_when_dependency_dropped(ds, naive):
     q = ds.query_by_id("q240")
     route = assemble_route_result(naive.rank(q.query_text, q.query_id), ds.tool_deps)
     assert "validate_email" in route.selected_tools  # pulled in by closure via the audible spine
+    assert "validate_email" in variant_a_required_set(q.main, ds.tool_deps)  # a REQUIRED-arg source
     dropped = [t for t in route.selected_tools if t != "validate_email"]
     route_c = route.model_copy(update={"selected_tools": dropped})
     rep = check_invariants(route_c, ds.tool_deps)
