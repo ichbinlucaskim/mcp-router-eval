@@ -101,3 +101,88 @@ judge-independent by construction. Report the attribution breakdown **per router
 
 *(Only these two papers are cited; standard retrieval metrics — mAP / recall / nDCG — are established
 practice and implemented without citation.)*
+
+## Amendment 2026-07-05 — `retrieval_success` conditions on the variant-A required-set (align `transfer_loss` with ADR-0030)
+
+This refines **only** the `retrieval_success` condition inside the north-star `transfer_loss` (metric
+group 3). The three metric groups, the conditional-vs-difference forms, and the depth slicing are all
+**unchanged**. No external papers are added; this is a keystone-consistency fix grounded in ADR-0030 and
+our measured full-eval output.
+
+### Context — the north-star headline came back empty (a target mismatch)
+
+`transfer_loss` (conditional, primary) `= 1 − P(completion | retrieval success)`. Today
+`retrieval_success` is `recall@10 ≥ 1.0` of the **full `golden_function_names`**
+(`src/mcp_router_eval/eval/metrics.py:174-175`; threshold `EvalConfig.threshold = 1.0`,
+`eval/harness.py:51`). But **completion** is scored on the **variant-A required-set** (ADR-0030) — so
+`transfer_loss = 1 − P(completion_variantA | retrieval_of_FULL_gold)` mixes **two different targets**.
+
+Measured on the full eval (`data/processed/eval/full_eval.json`, 236 test queries, 5 seeds):
+
+- The **deep** slice (closure-depth ≥ 6, `eval/slices.py:30`) holds **n = 140** queries — the *largest*
+  slice, so this is **not** sparsity.
+- **Zero** deep queries reach `recall@10 = 1.0` of the full gold set (deep `recall@10` ≤ **0.44** across
+  routers; e.g. NaiveRAG 0.219, traversal 0.443), so the conditional denominator is **empty** →
+  `nan`/`None` (`transfer_loss_conditional`'s empty-denominator guard) for **every** router at the deep
+  headline (plus all of BM25, whose recall is low at every slice).
+- The tell: **NaiveRAG's deep completion is 1.000, yet its deep `transfer_loss` is `None`** — undefined
+  *exactly where completion is perfectly defined*. The **difference** form is populated but **negative**
+  for all routers (e.g. traversal overall −0.366) because it computes `recall@10(full gold) −
+  completion(variant-A)` — the small spine completes more than the large full gold is recalled — the
+  same mismatch surfacing differently.
+
+This is the **same full-gold-vs-spine fix already made for completion (ADR-0030)**, not yet applied to
+`transfer_loss`'s retrieval condition.
+
+### Decision
+
+Condition `retrieval_success` on recalling the **variant-A required-set** — the required-argument
+`PARAMETER_*` spine (ADR-0030) — i.e. **`recall@k` of the required-set ≥ threshold**, the **same tools
+completion needs**, not the full label-noisy gold. Then:
+
+> **`transfer_loss = 1 − P(completion_variantA | retrieval of the variant-A required tools)`**
+
+— *"of the queries whose **required** tools were retrieved, how many still fail completion."* Both the
+**conditioning** and the **outcome** now use the variant-A target. The **difference** form is likewise
+recomputed against the spine (recall of the required-set − completion), so it is target-consistent and no
+longer sign-flipped.
+
+### Why this is not metric-gaming (stated explicitly)
+
+Identical justification to ADR-0030: the excluded full-gold tools are **query-irrelevant label noise**
+(system tools appear in ~80% of gold sets — `get_wifi_status` gold in 887/1098 train queries; missed
+184/235 in validation, `docs/adr/0004-…:78-79`). Requiring their *retrieval* measures label noise, not
+whether the query's **actual** tools were found. Conditioning on the spine is the **target-consistent**
+choice, and it is applied **uniformly to all seven routers** (baselines + GNN), so it favors no method.
+For transparency the evaluation reports **both**: the **primary** spine-conditioned `transfer_loss` and,
+where defined, the **secondary** full-gold-conditioned number — so the choice of retrieval target is
+auditable, exactly as ADR-0030 does for completion.
+
+### Expected effect (from the diagnosis — to verify on re-run)
+
+- **NaiveRAG deep → `transfer_loss ≈ 0`** (it recalls the spine *and* completes: deep completion 1.000).
+- **GNN deep → `transfer_loss ≈ 1.0`** (retrieval of the spine can succeed — deep `map@10 ≈ 0.42` — but
+  completion is 0.000): retrieval succeeds, completion does not follow.
+
+That contrast — high transfer loss where a dependency-aware method's retrieval does not convert to
+completion — is exactly the north-star signal the metric was designed to capture. The headline
+**populates** instead of being uniformly `n/a`.
+
+### Threshold
+
+Keep the **threshold semantics** (recall of the required-set ≥ threshold), noting the set is now the
+**spine**, not the full gold. The crude alternatives are **rejected** because they keep the mismatch:
+
+- *lower the threshold to ~0.5 against the full gold* — still conditions on label-noise tools;
+- *fall back to the difference form for the deep headline* — the difference keeps the same full-gold-vs-
+  spine mismatch (and stays negative).
+
+Required-set **alignment** is the real fix, not a looser threshold.
+
+### Scope
+
+Changes **only** `retrieval_success`'s target (the set it measures `recall@k` against) and therefore how
+`transfer_loss` (both conditional and difference) conditions — a metric/eval-layer change to be
+implemented as the **next step**. Completion, ordering, type-validity, the depth slices, and the
+retrieval metrics themselves (`mAP` / `recall` / `nDCG` reported against the full gold, established
+practice) are **unchanged**.
