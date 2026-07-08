@@ -172,7 +172,7 @@ Title / Status / Context / Decision / Consequences / Alternatives considered.
 | [0022](adr/0022-gnn-formulation-query-conditioned-scoring.md) | GNN router formulation = query-conditioned node scoring (not link prediction / node classification) | Accepted (amended 2026-07-05) |
 | [0023](adr/0023-gnn-negative-sampling.md) | GNN negative sampling = in-batch negatives + dependency-structure false-negative filter; hard negatives conservative | Accepted |
 | [0024](adr/0024-gnn-split-and-leakage.md) | GNN split = query-level (transductive graph shared); leakage prevented by train-only stats + tuning-only validation | Accepted |
-| [0025](adr/0025-gnn-architecture-hyperparameters.md) | GNN architecture: 2 layers fixed; hidden dim / GAT heads / dropout searched on validation | Accepted |
+| [0025](adr/0025-gnn-architecture-hyperparameters.md) | GNN architecture: 2 layers fixed; hidden dim / GAT heads / dropout searched on validation | Accepted (amended 2026-07-05 — adds a GCNII-style initial residual to counter hub-amplification collapse; supersedes the "no residual" line) |
 | [0026](adr/0026-gnn-training-setup.md) | GNN training setup: InfoNCE over in-batch negatives; AdamW; warm-up not required at our scale | Accepted |
 | [0027](adr/0027-homophily-local-definition.md) | homophily_local = node-level feature homophily (mean cosine to PARAMETER_* dependency neighbors) | Accepted |
 | [0028](adr/0028-evaluation-metrics.md) | Evaluation metrics = standard retrieval + structural completion + north-star transfer loss, sliced by depth, deterministic attribution | Accepted |
