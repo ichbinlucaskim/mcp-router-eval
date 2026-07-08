@@ -153,20 +153,45 @@ Paradoxically, the GNN's *ability to learn* is what lets it learn the bad shortc
 learning) cannot and so avoids it. **Verify simple retrieval baselines before reaching for graph learning
 on dependency graphs of this character.**
 
-## Full-evaluation headline — PLACEHOLDER (to be filled after `run_full_eval`)
+## Full-evaluation headline (test split, `data/processed/eval/full_eval.json`)
 
-> **TODO — populate from `data/processed/eval/full_eval.{json,txt}` once the user runs
-> `scripts/run_full_eval.py` on the TEST split (multi-seed).** The diagnosis numbers above are
-> **validation-split, short-trained** probes; the following are the test-split, multi-seed headline
-> (ADR 0028):
->
-> - **Deep-slice `transfer_loss`** (conditional, the north-star headline, ADR 0028) per router: _tbd_.
-> - **Overall variant-A completion** (PRIMARY) and full-golden completion (SECONDARY, ADR 0030) per
->   router, mean ± std across seeds: _tbd_.
-> - **`homophily_local` (ADR 0027) correlated with `transfer_loss`** (ADR 0028) — does low local homophily
->   predict high transfer loss where the GNN's homophily assumption fails: _tbd_.
-> - GNN entry: a representative collapse config is unnecessary — this document (config-invariant collapse)
->   is the GNN result; any single trained config reproduces completion ≈ 0.
+Test split **236 queries**, `k=10`, **5 seeds** (GNN mean ± std); baselines deterministic (ADR 0028/0029).
+Deep slice = closure-depth ≥ 6, **n = 140**. Completion is variant-A (PRIMARY) with full-golden as
+SECONDARY (ADR 0030); `transfer_loss` conditions retrieval-success on the variant-A spine (PRIMARY) with
+full-gold as SECONDARY (ADR-0028 amendment).
+
+| router | overall completion (variant-A / full-gold) | deep-slice `transfer_loss` (spine / full-gold) |
+| --- | ---: | ---: |
+| **NaiveRAG** | **0.979** / 0.114 | **0.000** / n/a |
+| **HybridRAG** | **0.936** / 0.097 | **0.000** / n/a |
+| **Traversal** | **0.877** / 0.093 | **0.000** / n/a |
+| **BM25** | **0.725** / 0.064 | **0.077** / n/a |
+| **GNN — R-GCN** | **0.000 ± 0.000** / 0.000 | **n/a** / n/a |
+| **GNN — GAT** | **0.052 ± 0.022** / 0.030 | **n/a** / n/a |
+| **GNN — SAGE** | **0.000 ± 0.000** / 0.000 | **n/a** / n/a |
+
+*(SECONDARY full-gold deep `transfer_loss` is `n/a` for **every** router — recalling the full label-noisy
+gold at `k=10` in the deep slice is unattainable; this is exactly the pathology the ADR-0028 amendment
+moved the PRIMARY off of, by conditioning on the spine.)*
+
+**Interpretation (honest).** The baselines transfer **near-perfectly**: they retrieve the query's required
+tools, so retrieval converts to completion (deep spine-conditioned `transfer_loss` **0.000** for
+NaiveRAG/HybridRAG/Traversal, **0.077** for BM25). The GNN's deep `transfer_loss` is **`n/a`** — but this is
+**not a gap in the metric, it is the result**: `transfer_loss = 1 − P(completion | retrieved the spine)`,
+and the GNN retrieves the spine for **0/235** queries (§ burial, over-smoothing 0.862), so the conditional
+denominator is **empty**. The GNN doesn't *lose* the retrieval→completion transfer — **it never earns the
+transfer, because it fails at the retrieval stage first** (overall completion **0.000 / 0.052 / 0.000**).
+That is the north-star signal: on this heterophilic, hub-dominated graph, the dependency-aware GNN cannot
+even surface the required tools, while learning-free dense retrieval completes 88–98% of queries.
+
+**Homophily ↔ transfer_loss correlation — not computed (honest).** No `homophily_local`↔`transfer_loss`
+correlation is present in `full_eval.json` (the metric blocks carry `retrieval` / `completion` /
+`transfer_loss` / `attribution` only — 0 occurrences of "homophily"). It **cannot** be formed GNN-side
+regardless: the GNN's `transfer_loss` is `n/a` (undefined under the 0/235 retrieval collapse), so there is
+no per-query GNN transfer-loss series to correlate against `homophily_local`. We do **not** fabricate a
+number. The heterophily driver is instead evidenced directly — measured dependency-pair Jaccard **0.08**
+(`docs/feasibility-completion.md:52-57`) and the message-passing over-smoothing (node pairwise cosine
+0.501 → 0.862) and burial (0/235) above — rather than via a correlation the run did not produce.
 
 ## Status / links
 
@@ -174,6 +199,10 @@ on dependency graphs of this character.**
   as a documented, config-invariant negative result — **not** under-tuning. It flips to XPASS only if a
   future change (targeting **Force 1**, the loss/label-frequency driver, or the message-passing structure
   itself) actually lifts completion off 0.
+- **The full TEST-split evaluation confirms it** (`full_eval.json`, 5 seeds): GNN overall completion
+  **0.000 / 0.052 / 0.000** and deep `transfer_loss` **n/a** (from 0/235 spine retrieval) reproduce the
+  config-invariant collapse established on validation — so the xfail stands as an honest, documented
+  negative result on held-out test data, not an artifact of tuning.
 - Related decisions and evidence: ADR 0010 (three backbones), ADR 0023 (false-negative filter — hypothesis
   refuted here), ADR-0025 amendment (initial residual — probed here), ADR 0027 (`homophily_local`),
   ADR 0028 (metrics / transfer loss), ADR 0030 (variant-A completion gate), ADR 0031 + amendment (logQ —
