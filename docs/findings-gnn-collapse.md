@@ -3,9 +3,10 @@
 **Status:** Negative result, documented. Establishes the xfail of
 `tests/test_gnn_router.py::test_full_pipeline_integration` (ADR-0030 de-circularization) as an **honest,
 config-invariant** outcome — not under-tuning. All numbers below are cited to measured data (this
-session's read-only diagnosis/probes) or to an ADR / data file (`file:line`). The only external paper
-cited here is **DPAA** (arXiv:2605.11145), verified this session; logQ and GCNII are referenced through
-their ADRs.
+session's read-only diagnosis/probes) or to an ADR / data file (`file:line`). External papers are cited
+under **Related work & positioning** below, where each is split into **Tier 1 (verified this session or
+across this project)** and **Tier 2 (surveyed, not independently verified)** — the mechanism in the body
+rests on the Tier-1 set (DPAA arXiv:2605.11145 in-line; logQ/GCNII via their ADRs).
 
 ---
 
@@ -223,6 +224,59 @@ no per-query GNN transfer-loss series to correlate against `homophily_local`. We
 number. The heterophily driver is instead evidenced directly — measured dependency-pair Jaccard **0.08**
 (`docs/feasibility-completion.md:52-57`) and the message-passing over-smoothing (node pairwise cosine
 0.501 → 0.862) and burial (0/235) above — rather than via a correlation the run did not produce.
+
+## Related work & positioning
+
+Our result — dense retrieval + structural recovery beats an end-to-end dependency-aware GNN on this graph
+— is **not a new phenomenon**. "Message passing degrades on heterophilic / hub-dominated graphs" is a
+known pattern in the graph-learning literature. Our contribution is a **controlled, mechanism-level
+reproduction in the MCP tool-routing domain**: an isolation probe (message passing *alone* collapses),
+a fairness audit, and a demonstration that standard remedies (logQ, GCNII initial residual) do not rescue
+it. The value is a **documented, well-attributed negative result whose conclusion aligns with the
+benchmark's own SOTA design** — not a contradiction of it. Citations below are layered by verification
+status; only Tier 1 is load-bearing.
+
+### Tier 1 — verified (cited authoritatively)
+
+- **Graph RAG-Tool Fusion** (Lumer, Honaganahalli Basavaraju, Mason, Burke, Subbiah — arXiv:2502.07223,
+  2025). *Verified this session by direct fetch (abstract + HTML + official GitHub BibTeX).* This is the
+  paper that **introduces ToolLinkOS** — the 573-fictional-tool benchmark (avg **6.3** dependencies per
+  tool) that is the **origin of our own benchmark**. Its method combines **vector-based retrieval with
+  deterministic graph traversal** over a *predefined* tool knowledge graph to pull each tool's dependency
+  closure — it is **not a learned GNN and does no message passing**; it is plug-and-play with **no model
+  fine-tuning**. It reports a **71.7% improvement over naïve RAG** on ToolLinkOS (mAP@10). The authors'
+  own diagnosis of why naïve RAG struggles — *"tool dependencies are often semantically unrelated to the
+  main tool"* — matches our **heterophily** finding (our measured dependency-pair Jaccard **≈ 0.08** is
+  **our** number, consistent with but not drawn from their paper).
+  - **Positioning (the key point).** The benchmark's *own creators* solve the dependency problem with
+    **dense retrieval + deterministic traversal**, not a learned GNN. So our result (dense retrieval +
+    structural recovery beats an end-to-end dependency-aware GNN) is **consistent with the benchmark's
+    SOTA design, not a contradiction of it** — the graph is meant to be *traversed*, not *message-passed*.
+- **DPAA** (arXiv:2605.11145). *Verified this session.* Grounds our amplification mechanism: skewed
+  degree distributions + repeated message passing amplify popular items into a popularity-dominated
+  embedding region (Force 2, § Mechanism).
+- **CLRec** (arXiv:2005.12964), **Correcting-the-LogQ / two-tower in-batch logQ** (arXiv:2507.09331), and
+  **GCNII initial residual** (arXiv:2007.02133). *Verified across this project* (referenced via their
+  ADRs). These ground the attempted remedies: the contrastive–IPW framing and in-batch logQ correction
+  (ADR 0031, § remedies) and the initial-residual feature preservation (ADR-0025 amendment, § remedies).
+
+### Tier 2 — broader literature (surveyed, not independently verified for this write-up)
+
+The following were gathered by a **follow-up literature search** and are cited **for context only**. Their
+specific claims were **not verified to this project's citation standard**, so they are **directional, not
+load-bearing** — no numeric claims are attached to them. A wider survey situates our result within known
+patterns:
+
+- **Heterophily-aware GNNs and graph-free MLPs** — work reporting that message passing underperforms
+  under heterophily, and that graph-free MLP-style models can match or beat message-passing GNNs in that
+  regime (e.g. H2GCN, LINKX, GLNN).
+- **Degree / over-smoothing normalization** — methods addressing hub dominance and repeated-aggregation
+  over-smoothing.
+- **Popularity-bias amplification in graph recommendation** — the broader line (beyond the Tier-1 DPAA
+  result) on message passing inflating popular-item scores.
+
+These are consistent with our findings but are **surveyed context**, not evidence we independently
+confirmed; the mechanism and conclusions in this document stand on the Tier-1 set alone.
 
 ## Status / links
 
