@@ -1,9 +1,9 @@
 # Documentation
 
-## Project status (as of 2026-07-05)
+## Project status (as of 2026-07-10)
 
 Groundwork: capstone proposal (with a dated post-ground-truth revision) + build-readiness report +
-firsthand ground-truth inspection; **ADRs 0001–0027**; repo scaffold; `scripts/fetch_data.py`
+firsthand ground-truth inspection; **ADRs 0001–0031**; repo scaffold; `scripts/fetch_data.py`
 (dataset pinned to commit `b630b98`).
 
 **Build order is dependency-driven, not §7 phase-number order** (see the proposal's "Build order
@@ -103,20 +103,29 @@ firsthand ground-truth inspection; **ADRs 0001–0027**; repo scaffold; `scripts
     executor → attribution). Deterministic; checkpoints gitignored.
   - **162 tests green on `main`** (152 prior + 10 `test_gnn_router`; GNN stages add 33 tests total).
 - **Five routers now stand behind one contract:** {BM25, NaiveRAG, HybridRAG, Traversal, GNN}.
+- **Done — Evaluation harness + comparative study (T4)**, on `main` (ADR 0005 / 0028 / 0029 / 0030 / 0031):
+  - **`eval/`** — `metrics.py` (retrieval + structural completion + north-star `transfer_loss`),
+    `slices.py` (closure-depth buckets, ADR 0005), `harness.py` (uniform per-query gate/attribution
+    across all five routers), `tuning.py` (deterministic grid search, multi-seed; ADR 0029);
+    `scripts/run_full_eval.py` drives the test-split comparison.
+  - **Documented negative result:** the dependency-aware GNN **collapses** on completion
+    (config-invariant; R-GCN/SAGE 0.000, GAT 0.052 vs NaiveRAG 0.979) via message-passing hub
+    amplification + a frequency-biased loss — full analysis in
+    [`findings-gnn-collapse.md`](findings-gnn-collapse.md), config provenance in
+    [`full-eval-gnn-config.md`](full-eval-gnn-config.md).
 - **Cumulative done:** contract layer (T1) + data pipeline + **executor primary (T2)** + embedding
   provider + **routers {BM25, NaiveRAG, HybridRAG, Traversal, GNN} + shared closure stage (T3)** +
-  **full GNN (design ADRs 0022–0027 + implementation stages 1–3)**.
-- **Current position:** **all five routers implemented behind the same contract** — **entering the
-  evaluation harness** (the north-star: structural completion + retrieval→completion transfer-loss
-  comparison across all five routers).
-- **Cumulative remaining:** **evaluation** (retrieval metrics + closure-depth slices, ADR 0005; the
-  north-star structural-completion + transfer-loss comparison across all five routers) → **SDK replay
-  adapter** (`executor/claude_exec.py`, demonstration only, off the critical path — ADR 0015) →
-  **gate** (deferred).
+  **full GNN (design ADRs 0022–0027 + implementation stages 1–3)** + **evaluation harness + comparative
+  study (T4, ADRs 0028–0031)**.
+- **Current position:** **evaluation complete; GNN-collapse negative result documented** (test split,
+  5 seeds) — the north-star structural-completion + retrieval→completion transfer-loss comparison across
+  all five routers is done.
+- **Cumulative remaining:** **SDK replay adapter** (`executor/claude_exec.py`, demonstration only, off
+  the critical path — ADR 0015) → **gate** (deferred).
 - **Deferred — `gate.py` (T1.4):** consumes `confidence` / `homophily_local` (router) and is tuned
   against `completion_rate` (executor); the full router set now exists, so it unblocks alongside the gate.
 - Still intentional stubs (`raise NotImplementedError`): `embedding/openai_embed.py`,
-  `executor/claude_exec.py`, `eval/*`, `contract_layer/gate.py`.
+  `executor/claude_exec.py`, `contract_layer/gate.py`.
 
 ## Standing rule — verify before asserting (all sessions)
 
@@ -128,6 +137,8 @@ cannot be verified, **say so explicitly** rather than asserting it.
 
 ## Reference docs
 
+- [`findings-gnn-collapse.md`](findings-gnn-collapse.md) — **core deliverable**: the GNN-collapse negative result (mechanism, controlled evidence, fairness audit, related work).
+- [`full-eval-gnn-config.md`](full-eval-gnn-config.md) — committed provenance for the full-eval GNN config (reproduces the gitignored JSON).
 - [`data-inspection-toollinkos.md`](data-inspection-toollinkos.md) — firsthand ground-truth of the dataset.
 - [`build-readiness-report.md`](build-readiness-report.md) — point-in-time environment/dataset inspection (with dated corrections).
 - [`completion-scoring-examples.md`](completion-scoring-examples.md) — worked structural-completion scenarios (test-case ready).

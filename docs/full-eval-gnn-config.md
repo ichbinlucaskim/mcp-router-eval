@@ -72,6 +72,6 @@ PYTHONPATH=src python scripts/run_full_eval.py --config data/processed/eval/full
 ```
 
 Trains each backbone over 5 seeds (mean ± std, ADR 0029), evaluates all five routers on the **test** split
-(ADR 0024/0028), and writes `full_eval.{json,txt}` to the (gitignored) eval dir. The GNN entries are
-expected to reproduce completion ≈ 0 (config-invariant collapse); the numbers fill the PLACEHOLDER in
-`docs/findings-gnn-collapse.md`.
+(ADR 0024/0028), and writes `full_eval.{json,txt}` to the (gitignored) eval dir. The GNN entries reproduced
+completion ≈ 0 (config-invariant collapse); those numbers now populate the headline table in
+`docs/findings-gnn-collapse.md` (§ Full-evaluation headline).

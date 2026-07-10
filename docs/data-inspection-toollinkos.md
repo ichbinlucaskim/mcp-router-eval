@@ -48,6 +48,10 @@ with `scripts/fetch_data.py`; provenance is in `data/raw/SOURCE.md`.
 | `TOOL_INDIRECTLY_DEPENDS_ON` | 175 |
 | `PARAMETER_DEPENDS_ON` *(malformed)* | 2 |
 
+> **These are RAW counts** (`data/raw/` @ `b630b98`, pre-normalization). Preprocessing normalizes the 2
+> malformed rows into `PARAMETER_DIRECTLY_DEPENDS_ON`, so the processed per-type totals differ (+1 each
+> for the affected types); see `docs/feasibility-completion.md` for the raw↔processed reconciliation.
+
 - **4 canonical types + exactly 2 malformed rows.** Both malformed rows are `PARAMETER_DEPENDS_ON`
   on `join_doctor_virtual_consultation` and `cancel_doctors_appointment`, both targeting
   `get_doctor_appointments` with a `parameter_name` → clearly intended as `PARAMETER_DIRECTLY_DEPENDS_ON`.

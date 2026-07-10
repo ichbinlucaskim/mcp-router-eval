@@ -1,17 +1,47 @@
 # mcp-router-eval
 
-Contract-driven evaluation of GNN tool routing in agentic MCP pipelines. This project measures
-the **transfer loss** from retrieval accuracy to end-to-end task completion across a three-layer
-pipeline (GNN Router → executor-agnostic Contract Layer → Claude Code executor), and tests whether
-a dependency-aware learned GNN router reduces that loss on dependency/composite queries. The middle
+Contract-driven evaluation of GNN tool routing in agentic MCP pipelines. It measures the **transfer
+loss** from retrieval accuracy to end-to-end task completion across a three-layer pipeline (Router →
+executor-agnostic Contract Layer → Claude Code executor) and compares five routers — BM25, NaiveRAG,
+HybridRAG, Traversal, and a dependency-aware learned GNN — on dependency/composite queries. The middle
 **Contract Layer** — typed I/O schemas, dependency-closure invariants, and a router/contract/executor
 failure-attribution taxonomy — is the engineering centerpiece.
 
-See [`capstone_proposal.md`](capstone_proposal.md) for the full design (architecture, data contracts,
-metrics, and the 14-week task plan) and [`docs/`](docs/) for architecture decision records (ADRs)
-capturing the choices made so far.
+**Headline result:** on the ToolLinkOS benchmark, a learning-free dense-retrieval baseline (**NaiveRAG,
+0.979** structural completion) **beats the dependency-aware GNN** (**≤ 0.052**; R-GCN/SAGE 0.000, GAT
+0.052). The GNN collapses via message-passing **hub amplification** compounded by a **frequency-biased
+loss** — a documented **negative result**, consistent with the benchmark's own SOTA (dense retrieval +
+deterministic traversal, not a learned GNN). Full write-up: [`docs/findings-gnn-collapse.md`](docs/findings-gnn-collapse.md).
 
-> Status: **scaffolding only** — modules are stubs; no logic is implemented yet.
+## How to run
+
+```bash
+# run the full five-router comparative evaluation (test split, 5 seeds)
+PYTHONPATH=src python scripts/run_full_eval.py \
+  --config data/processed/eval/full_eval_gnn_config.json --seeds 5
+
+# tests
+PYTHONPATH=src pytest
+```
+
+The GNN config's provenance (and how to reproduce the gitignored JSON) is in
+[`docs/full-eval-gnn-config.md`](docs/full-eval-gnn-config.md).
+
+## Repository structure
+
+- `src/mcp_router_eval/` — `routers/` (BM25, NaiveRAG, HybridRAG, Traversal, GNN + shared closure),
+  `contract_layer/` (invariants, attribution, gate), `executor/` (mock runner + SDK replay adapter),
+  `embedding/` (provider interface + local BGE), `eval/` (metrics, harness, slices, tuning), `data/`
+  (preprocess, loader, graph build).
+- `scripts/` — `fetch_data.py` (pinned dataset fetch), `run_full_eval.py`, `run_grid_search.py`.
+- `docs/` — findings, reference reports, and the ADR index; `capstone_proposal.md` — full design.
+
+## Where to read
+
+- [`docs/findings-gnn-collapse.md`](docs/findings-gnn-collapse.md) — the core deliverable (GNN-collapse
+  negative result: mechanism, controlled evidence, fairness audit, related work).
+- [`docs/README.md`](docs/README.md) — project status and the ADR index.
+- [`capstone_proposal.md`](capstone_proposal.md) — full design (architecture, data contracts, metrics).
 
 ## License
 
