@@ -1,0 +1,56 @@
+name: CI
+
+# mcp-router-eval runs from src (pyproject sets pythonpath=src); no editable
+# install is needed. The gate is lint -> fetch data -> preprocess -> tests.
+#
+# The strict xfail in tests/test_gnn_router.py locks the GNN-collapse finding:
+# it xfails today (build stays green) and will FAIL the build the day the GNN
+# recovers the variant-A spine (XPASS under strict=True), forcing the ADR-0030
+# re-evaluation instead of passing silently. See ADR-0032 for the ruff config
+# and this gate.
+#
+# claude-agent-sdk is a declared dependency but an off-critical-path SDK-replay
+# stub the test suite never imports; it is intentionally left out of the CI
+# install, mirroring the environment the suite is verified against.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      # CPU torch keeps the runner light; the rest come from PyPI. Deps are listed
+      # explicitly (minus claude-agent-sdk, see header) so CI matches the tested env.
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install torch-geometric pydantic scikit-learn numpy pandas \
+                      rank-bm25 sentence-transformers jsonschema pyyaml
+          pip install "ruff==0.5.5" pytest
+
+      - name: Lint (ruff)
+        run: ruff check src tests
+
+      - name: Fetch dataset (ToolLinkOS, pinned upstream commit)
+        run: python scripts/fetch_data.py
+
+      - name: Preprocess (raw -> processed, deterministic)
+        run: PYTHONPATH=src python -m mcp_router_eval.data.preprocess
+
+      - name: Test (pytest; BGE model downloads to the HF cache on first use)
+        run: PYTHONPATH=src python -m pytest -q
