@@ -28,10 +28,37 @@ dependencies = [
 [project.optional-dependencies]
 # Optional acceleration for PyG; only install if a segment-op error appears (see build-readiness report).
 scatter = ["torch-scatter"]
-dev = ["pytest"]
+dev = ["pytest", "ruff==0.5.5"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+# line-length is 120 here (osm-link-inference is 100). Each repo lints at the
+# width its code was actually written to; osm passes cleanly at 100, this code
+# was written to ~120. Rule *families* are identical across both repos — the
+# width and the RUF unicode carve-out are the only differences. See ADR-0032.
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+# Rule families match osm-link-inference so the portfolio enforces the same gate.
+select = [
+    "E",    # pycodestyle errors
+    "F",    # pyflakes
+    "I",    # isort
+    "UP",   # pyupgrade
+    "B",    # flake8-bugbear
+    "SIM",  # flake8-simplify
+    "RUF",  # ruff-specific
+]
+# α, ×, −, – in comments/docstrings are deliberate math notation from the ADRs
+# and GNN write-ups, not typos. Flagging them is a linter false positive. See ADR-0032.
+ignore = [
+    "RUF002",  # ambiguous unicode in docstrings
+    "RUF003",  # ambiguous unicode in comments
+]
 
 [tool.pytest.ini_options]
 # Make `pytest` work from a fresh clone without installing the package.
