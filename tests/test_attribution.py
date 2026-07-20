@@ -9,7 +9,6 @@ import pytest
 
 from mcp_router_eval.contract_layer.attribution import attribute
 from mcp_router_eval.contracts import (
-    Attribution,
     Blame,
     ExecResult,
     InvariantReport,

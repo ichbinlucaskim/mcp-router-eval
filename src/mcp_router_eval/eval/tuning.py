@@ -18,6 +18,16 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from mcp_router_eval.data.graph_build import build_graph
+from mcp_router_eval.data.loader import Dataset, Query
+from mcp_router_eval.embedding.base import Embedder
+from mcp_router_eval.eval import metrics as M
+from mcp_router_eval.eval import slices as S
+from mcp_router_eval.eval.harness import EVAL_DIR, EvalConfig, build_routers, evaluate_query
+from mcp_router_eval.eval.metrics import QueryResult
+from mcp_router_eval.routers.gnn import GNNRouter
+from mcp_router_eval.routers.gnn_train import GNNTrainConfig, GNNTrainer, split_queries
+
 
 def _default_log(msg: str) -> None:
     """Live progress line to stdout (flushed so it appears immediately, not buffered)."""
@@ -30,16 +40,6 @@ def _fmt_dur(seconds: float) -> str:
     h, rem = divmod(s, 3600)
     m, sec = divmod(rem, 60)
     return f"{h}h{m:02d}m{sec:02d}s" if h else f"{m}m{sec:02d}s"
-
-from mcp_router_eval.data.graph_build import build_graph
-from mcp_router_eval.data.loader import Dataset, Query
-from mcp_router_eval.embedding.base import Embedder
-from mcp_router_eval.eval import metrics as M
-from mcp_router_eval.eval import slices as S
-from mcp_router_eval.eval.harness import EVAL_DIR, EvalConfig, evaluate_query, build_routers
-from mcp_router_eval.eval.metrics import QueryResult
-from mcp_router_eval.routers.gnn import GNNRouter
-from mcp_router_eval.routers.gnn_train import GNNTrainConfig, GNNTrainer, split_queries
 
 # --- ADR 0025/0026 discrete search space --------------------------------------------------------- #
 HIDDENS = (32, 64, 128)          # ADR 0025
@@ -285,7 +285,8 @@ def run_full_eval(
     ckpt_dir = out_dir / "eval_ckpts"
     for backbone, config in best_configs.items():
         per_seed = []
-        for s, ckpt in zip(seeds, train_seeds(dataset, graph, embedder, config, seeds, ckpt_dir, on_progress=log)):
+        seed_ckpts = train_seeds(dataset, graph, embedder, config, seeds, ckpt_dir, on_progress=log)
+        for s, ckpt in zip(seeds, seed_ckpts, strict=False):
             log(f"[full-eval] gnn_{backbone} seed {s}: eval on test…")
             router = GNNRouter.from_checkpoint(ckpt, dataset, graph, embedder)
             per_seed.append(_router_report(_results_for(router, test_queries, dataset), cfg))

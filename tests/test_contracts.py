@@ -76,7 +76,11 @@ def _exec_result() -> ExecResult:
         trace_id="trace-q240",
         call_trace=[
             ToolCall(tool_id="validate_email", args={"email": "x@y.com"}, ok=True, error=None, t_ms=3),
-            ToolCall(tool_id="audible_account_login", args={"email": "x@y.com", "password": "p"}, ok=True, error=None, t_ms=12),
+            ToolCall(
+                tool_id="audible_account_login",
+                args={"email": "x@y.com", "password": "p"},
+                ok=True, error=None, t_ms=12,
+            ),
         ],
         completed=True,
         latency_ms=LatencyMs(routing=5, contract=2, execution=20, total=27),
@@ -161,7 +165,7 @@ def test_edge_type_literals_are_canonical():
 
 
 def test_ordering_relations_are_parameter_only():
-    assert ORDERING_RELATIONS == frozenset({EdgeType.PARAM_DIRECT, EdgeType.PARAM_INDIRECT})
+    assert frozenset({EdgeType.PARAM_DIRECT, EdgeType.PARAM_INDIRECT}) == ORDERING_RELATIONS
     # TOOL_* are representation-only (ADR 0013)
     assert EdgeType.TOOL_DIRECT not in ORDERING_RELATIONS
     assert EdgeType.TOOL_INDIRECT not in ORDERING_RELATIONS

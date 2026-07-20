@@ -7,7 +7,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import numpy as np
 import pytest
 import torch
 from torch import nn
@@ -125,8 +124,10 @@ def test_alpha_res_zero_is_exact_baseline():
     # α_res=0 builds NO projection module → the forward is byte-identical to the pre-amendment encoder.
     x, ei, et = _syn()
     for cls, needs_et in _BACKBONES_ET:
-        torch.manual_seed(0); base = cls(x.shape[1], alpha_res=0.0).eval()
-        torch.manual_seed(0); resid = cls(x.shape[1], alpha_res=0.5).eval()
+        torch.manual_seed(0)
+        base = cls(x.shape[1], alpha_res=0.0).eval()
+        torch.manual_seed(0)
+        resid = cls(x.shape[1], alpha_res=0.5).eval()
         assert base.h0_proj is None                                  # no residual params at α_res=0
         assert not any("h0_proj" in n for n, _ in base.named_parameters())
         # conv weights match (h0_proj built AFTER the convs) → the residual is the ONLY difference
@@ -144,9 +145,12 @@ def test_alpha_res_one_replaces_mp_with_shared_projection():
     # α_res=1 → the output layer's MP is fully replaced by the shared h0 projection (feature preservation).
     x, ei, et = _syn()
     for cls, needs_et in _BACKBONES_ET:
-        torch.manual_seed(0); enc = cls(x.shape[1], alpha_res=1.0).eval()
+        torch.manual_seed(0)
+        enc = cls(x.shape[1], alpha_res=1.0).eval()
         assert enc.h0_proj is not None
-        assert enc.h0_proj.in_features == x.shape[1] and enc.h0_proj.out_features == enc.hidden  # one shared proj → hidden
+        # one shared proj → hidden
+        assert enc.h0_proj.in_features == x.shape[1]
+        assert enc.h0_proj.out_features == enc.hidden
         with torch.no_grad():
             out = enc(x, ei, et if needs_et else None)
         assert torch.allclose(out, enc.h0_proj(x), atol=1e-6)        # output == projected raw features
@@ -155,8 +159,10 @@ def test_alpha_res_one_replaces_mp_with_shared_projection():
 def test_initial_residual_shape_and_determinism(ctx):
     x, ei, et = ctx["x"], ctx["edge_index"], ctx["edge_type"]
     for cls, needs_et in _BACKBONES_ET:
-        torch.manual_seed(1); a = cls(x.shape[1], alpha_res=0.5).eval()
-        torch.manual_seed(1); b = cls(x.shape[1], alpha_res=0.5).eval()
+        torch.manual_seed(1)
+        a = cls(x.shape[1], alpha_res=0.5).eval()
+        torch.manual_seed(1)
+        b = cls(x.shape[1], alpha_res=0.5).eval()
         with torch.no_grad():
             ha = a(x, ei, et if needs_et else None)
             hb = b(x, ei, et if needs_et else None)

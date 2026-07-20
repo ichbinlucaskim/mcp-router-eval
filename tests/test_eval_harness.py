@@ -6,12 +6,11 @@ from pathlib import Path
 
 import pytest
 
-from mcp_router_eval.contracts import Blame
+from mcp_router_eval.contract_layer.invariants import check_invariants
+from mcp_router_eval.contracts import Blame, RouteResult
 from mcp_router_eval.data.graph_build import build_graph
 from mcp_router_eval.data.loader import load
 from mcp_router_eval.embedding.local import LocalEmbedder
-from mcp_router_eval.contract_layer.invariants import check_invariants
-from mcp_router_eval.contracts import RouteResult
 from mcp_router_eval.eval.harness import (
     EVAL_DIR,
     EvalConfig,
@@ -123,7 +122,7 @@ def test_comparison_structure_and_finite(env, tmp_path):
         out_dir=tmp_path / "eval", save=True,
     )
     assert set(comp["routers"]) == {"bm25", "naive_rag", "hybrid_rag", "traversal", "gnn_rgcn"}
-    for name, rep in comp["routers"].items():
+    for rep in comp["routers"].values():
         assert set(rep["slices"]) == {SHALLOW, MEDIUM, DEEP}             # every slice present
         for block in [rep["overall"], *rep["slices"].values()]:
             r = block["retrieval"]
