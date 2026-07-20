@@ -6,6 +6,11 @@ Accepted. **Supersedes the ADR-0004 2026-07-05 amendment's A/B ambiguity** (that
 spine" but straddled two incompatible spine definitions and carried a data-factual error; both are
 resolved here). ADR-0004's core decision — completion is a *structural proxy* — stands unchanged.
 
+**Amendment (2026-07-20, ADR-0032):** the collapse-lock xfail on
+`test_gnn_router.py::test_full_pipeline_integration` is now `strict=True`. Once CI runs this test, a
+silent XPASS is unacceptable — a recovered GNN must fail the build and trigger the re-evaluation this
+ADR anticipates, not pass unnoticed. The `strict=False` note below is superseded.
+
 ## Context
 
 The full-project consistency checkup found the completion **required-set** — *which* tools must be

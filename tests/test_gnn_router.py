@@ -173,7 +173,10 @@ def test_determinism_same_checkpoint(env):
         "pass/fail. The assertion body below is the correct de-circularized check — it currently xfails, "
         "it is NOT rewritten to assert failure."
     ),
-    strict=False,   # a future debiasing fix that makes it pass surfaces as XPASS, not an error
+    # strict: an XPASS (the GNN recovering the spine) MUST fail CI, forcing the ADR-0030
+    # re-evaluation rather than passing silently. Supersedes the original strict=False
+    # (ADR-0030); see ADR-0032 for the CI-gate rationale.
+    strict=True,
 )
 def test_full_pipeline_integration(env):
     # De-circularized (ADR-0030, checkup step 5): completion is scored against the variant-A required-set
