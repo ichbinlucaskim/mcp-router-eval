@@ -1,8 +1,8 @@
 """Closure-depth slicing (ADR 0005/0024) — synthetic, no real data / no harness."""
 from __future__ import annotations
 
-from mcp_router_eval.contracts import EdgeType
 from mcp_router_eval.contract_layer.invariants import Dep
+from mcp_router_eval.contracts import EdgeType
 from mcp_router_eval.eval.metrics import QueryResult, completion_rate
 from mcp_router_eval.eval.slices import (
     DEEP,

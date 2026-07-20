@@ -81,7 +81,7 @@ def test_cache_round_trip(embedder, tmp_path):
 
 def test_cache_recomputes_only_missing(embedder):
     embedder.encode(_TEXTS)
-    embedder.encode(_TEXTS + ["a brand new sentence"])
+    embedder.encode([*_TEXTS, "a brand new sentence"])
     assert embedder.last_computed == 1  # only the new text is computed
 
 

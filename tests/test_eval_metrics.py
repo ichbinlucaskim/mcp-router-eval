@@ -5,6 +5,7 @@ import math
 
 from mcp_router_eval.contracts import Blame
 from mcp_router_eval.eval.metrics import (
+    QueryResult,
     attribution_breakdown,
     average_precision_at_k,
     completion_rate,
@@ -14,7 +15,6 @@ from mcp_router_eval.eval.metrics import (
     mean_ndcg_at_k,
     mean_recall_at_k,
     ndcg_at_k,
-    QueryResult,
     recall_at_k,
     retrieval_success,
     transfer_loss_conditional,
@@ -101,7 +101,7 @@ def test_sub_rates_isolate_the_cause():
     good = [_qr(f"g{i}", ["a"], {"a"}) for i in range(3)]
     order_fail = _qr("bad", ["a"], {"a"}, completed=False, name=True, schema=True,
                      dep=False, runtime=False, blame=Blame.EXECUTION)
-    rates = completion_sub_rates(good + [order_fail])
+    rates = completion_sub_rates([*good, order_fail])
     assert rates["name_validity"] == 1.0                    # tool set was correct for all 4
     assert rates["schema_adherence"] == 1.0
     assert rates["dependency_compliance"] == 0.75           # 3/4 — the order failure isolated here

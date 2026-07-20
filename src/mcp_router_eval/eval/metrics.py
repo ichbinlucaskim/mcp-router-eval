@@ -66,8 +66,10 @@ class QueryResult:
     blame: Blame | None                # deterministic attribution (None on success)
     closure_depth: int                 # size of the PARAMETER_* closure (for depth slicing)
     router_name: str = "?"             # for the per-router breakdown
-    completed_full_golden: bool = False  # SECONDARY completion — full golden_function_names (ADR 0030; reported, never in transfer_loss)
-    required_set: frozenset[str] = frozenset()  # variant-A required-arg spine — transfer_loss's PRIMARY retrieval-success target (ADR 0028 amend / 0030)
+    # SECONDARY completion — full golden_function_names (ADR 0030; reported, never in transfer_loss)
+    completed_full_golden: bool = False
+    # variant-A required-arg spine — transfer_loss's PRIMARY retrieval-success target (ADR 0028 amend / 0030)
+    required_set: frozenset[str] = frozenset()
 
 
 # --------------------------------------------------------------------------- #

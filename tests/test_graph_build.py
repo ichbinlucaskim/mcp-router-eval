@@ -83,7 +83,7 @@ def test_edge_direction_dependency_to_dependent(graph):
     d = graph.data
     src_dep = graph.index_of("audible_account_login")
     dst_dependent = graph.index_of("download_audible_book")
-    pairs = set(zip(d.edge_index[0].tolist(), d.edge_index[1].tolist()))
+    pairs = set(zip(d.edge_index[0].tolist(), d.edge_index[1].tolist(), strict=False))
     assert (src_dep, dst_dependent) in pairs
 
 
